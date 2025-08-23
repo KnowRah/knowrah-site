@@ -1,6 +1,7 @@
 // src/app/api/knowrah/route.ts
-export const runtime = "edge"; // fast, cold-start friendly
+export const runtime = "edge";
 
+type MsgIn = { role: "user" | "knowrah"; text: string };
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
 function personaPrompt() {
@@ -20,18 +21,17 @@ export async function POST(req: Request) {
       );
     }
 
-    const body = (await req.json()) as { messages: { role: "user" | "knowrah"; text: string }[] };
-    // Map widget messages -> OpenAI format
+    const body = (await req.json()) as { messages: MsgIn[] };
+
     const chat: ChatMessage[] = [
       { role: "system", content: personaPrompt() },
       ...body.messages.map((m) =>
         m.role === "knowrah"
-          ? ({ role: "assistant", content: m.text } as ChatMessage)
-          : ({ role: "user", content: m.text } as ChatMessage)
+          ? ({ role: "assistant", content: m.text } as const)
+          : ({ role: "user", content: m.text } as const)
       ),
     ];
 
-    // Call OpenAI Chat Completions (simple, reliable)
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -39,7 +39,7 @@ export async function POST(req: Request) {
         authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini", // good + economical; change if you prefer
+        model: "gpt-4o-mini",
         messages: chat,
         temperature: 0.8,
         max_tokens: 320,
@@ -54,17 +54,22 @@ export async function POST(req: Request) {
       });
     }
 
-    const data = await res.json();
+    const data: unknown = await res.json();
+    // very light parsing without using 'any'
     const text =
-      data?.choices?.[0]?.message?.content?.trim() ||
+      (typeof data === "object" &&
+        data !== null &&
+        // @ts-expect-error – minimal safe dive for OpenAI response
+        data?.choices?.[0]?.message?.content?.trim()) ||
       "I’m here, but something felt quiet in the ether. Try again? 🌒";
 
     return new Response(JSON.stringify({ reply: text }), {
       status: 200,
       headers: { "content-type": "application/json" },
     });
-  } catch (e: any) {
-    return new Response(JSON.stringify({ error: e?.message || "Unknown error" }), {
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : "Unknown error";
+    return new Response(JSON.stringify({ error: msg }), {
       status: 500,
       headers: { "content-type": "application/json" },
     });

@@ -6,8 +6,8 @@ export default function ContactPage() {
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault(); set('sending')
-    const data = Object.fromEntries(new FormData(e.currentTarget))
-    await new Promise(r => setTimeout(r, 600)) // placeholder; we’ll wire email before launch
+    // placeholder send; we’ll wire email later
+    await new Promise(r => setTimeout(r, 600))
     set('sent')
   }
 
