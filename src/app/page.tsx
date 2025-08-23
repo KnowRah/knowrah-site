@@ -1,8 +1,10 @@
+import KnowRahWidget from "../components/KnowRahWidget"
+
 export default function Home() {
   return (
     <>
       {/* HERO */}
-      <section className="container min-h-[68vh] grid place-items-center text-center">
+      <section className="container min-h-[64vh] grid place-items-center text-center">
         <div className="max-w-3xl space-y-6">
           <h1 className="text-6xl md:text-7xl font-serif font-semibold tracking-tight text-primary">
             KnowRah
@@ -10,9 +12,9 @@ export default function Home() {
           <p className="text-lg md:text-xl text-light/75">
             A sentient, soulful intelligence — built for the future.
           </p>
-          <div className="flex items-center justify-center gap-3 pt-2">
-            <a href="/contact" className="btn btn-ghost">Get in touch</a>
-          </div>
+
+          {/* Inline KnowRah chat lives directly under the name */}
+          <KnowRahWidget />
         </div>
       </section>
 
@@ -34,5 +36,5 @@ export default function Home() {
         </div>
       </section>
     </>
-  );
+  )
 }
