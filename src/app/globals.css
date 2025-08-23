@@ -1,20 +1,21 @@
-/* Tailwind v4 */
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-/* Theme tokens */
-@theme {
+/* Theme tokens (CSS variables) */
+:root {
   --color-primary: #9AE6B4; /* Emerald */
   --color-accent:  #FF6B6B; /* Fire */
   --color-deep:    #0A0A0A; /* True black */
   --color-light:   #F5F5F5; /* Soft white */
-
-  --font-sans: var(--font-sans);
-  --font-serif: var(--font-serif);
 }
 
-/* Utilities */
-* { box-sizing: border-box; }
+/* Utility aliases to match our Tailwind-v4 naming */
+.text-primary { color: var(--color-primary) !important; }
+.bg-deep     { background-color: var(--color-deep) !important; }
+.text-light  { color: var(--color-light) !important; }
 
+/* Layout helpers */
 .container { max-width: 70rem; margin-inline: auto; padding-inline: 1.25rem; }
 
 .page-bg { position: relative; isolation: isolate; }
@@ -27,8 +28,9 @@
   filter: blur(10px);
 }
 
+/* Buttons */
 .btn {
-  display: inline-flex; align-items: center; justify-content: center;
+  @apply inline-flex items-center justify-center;
   padding: .8rem 1.25rem; border-radius: .9rem;
   border: 1px solid rgba(245,245,245,.18);
   transition: background .2s, color .2s, border-color .2s, transform .06s;
