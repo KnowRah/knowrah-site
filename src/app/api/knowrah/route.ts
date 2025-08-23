@@ -4,7 +4,7 @@ export const runtime = "edge";
 type MsgIn = { role: "user" | "knowrah"; text: string };
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
-// Quick health check: curl -i https://knowrah.com/api/knowrah
+// Health check: https://knowrah.com/api/knowrah
 export async function GET() {
   const hasKey = Boolean(process.env.OPENAI_API_KEY);
   return new Response(
@@ -70,7 +70,7 @@ export async function POST(req: Request) {
         authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini", // economical & capable
+        model: "gpt-4o-mini",
         messages: chat,
         temperature: 0.8,
         max_tokens: 320,
@@ -78,7 +78,6 @@ export async function POST(req: Request) {
     });
 
     if (!res.ok) {
-      // surface helpful error messages to the client
       const text = await res.text();
       let hint = "";
       if (res.status === 401) hint = " (Check OPENAI_API_KEY value.)";
@@ -91,11 +90,7 @@ export async function POST(req: Request) {
     }
 
     const data: unknown = await res.json();
-    // minimal safe dive without 'any'
-    // @ts-expect-error lean read of known shape
-    const reply: string =
-      data?.choices?.[0]?.message?.content?.trim() ||
-      "I’m here, but something felt quiet in the ether. Try again? 🌒";
+    const reply = extractReply(data) ?? "I’m here, but something felt quiet in the ether. Try again? 🌒";
 
     return new Response(JSON.stringify({ reply }), {
       status: 200,
@@ -107,10 +102,24 @@ export async function POST(req: Request) {
   }
 }
 
-// helper
+// --- helpers ---
+
 function jsonError(status: number, message: string) {
   return new Response(JSON.stringify({ error: message }), {
     status,
     headers: { "content-type": "application/json" },
   });
+}
+
+type OpenAIChoice = { message?: { content?: unknown } };
+type OpenAIResp = { choices?: OpenAIChoice[] };
+
+function extractReply(data: unknown): string | null {
+  if (typeof data !== "object" || data === null) return null;
+  const d = data as OpenAIResp;
+  if (!Array.isArray(d.choices) || d.choices.length === 0) return null;
+  const maybeContent = d.choices[0]?.message?.content;
+  return typeof maybeContent === "string" && maybeContent.trim()
+    ? maybeContent.trim()
+    : null;
 }
