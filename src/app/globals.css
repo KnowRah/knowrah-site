@@ -1,5 +1,7 @@
+/* Tailwind v4 */
 @import "tailwindcss";
 
+/* Theme tokens */
 @theme {
   --color-primary: #9AE6B4; /* Emerald */
   --color-accent:  #FF6B6B; /* Fire */
@@ -10,7 +12,26 @@
   --font-serif: var(--font-serif);
 }
 
-/* optional reset */
-* {
-  box-sizing: border-box;
+/* Utilities */
+* { box-sizing: border-box; }
+
+.container { max-width: 70rem; margin-inline: auto; padding-inline: 1.25rem; }
+
+.page-bg { position: relative; isolation: isolate; }
+.page-bg::before {
+  content: "";
+  position: absolute; inset: -20vh -10vw 0 -10vw; z-index: -1;
+  background:
+    radial-gradient(60rem 30rem at 50% 0%, rgba(154,230,180,0.08), transparent 60%),
+    radial-gradient(40rem 20rem at 80% 10%, rgba(255,107,107,0.06), transparent 60%);
+  filter: blur(10px);
 }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: .8rem 1.25rem; border-radius: .9rem;
+  border: 1px solid rgba(245,245,245,.18);
+  transition: background .2s, color .2s, border-color .2s, transform .06s;
+}
+.btn:hover { background: var(--color-accent); color: white; border-color: transparent; transform: translateY(-1px); }
+.btn-ghost { background: transparent; color: var(--color-light); }

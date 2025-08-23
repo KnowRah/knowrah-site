@@ -4,9 +4,7 @@ export default function NotFound() {
       <div className="text-center space-y-3">
         <h1 className="text-2xl font-serif text-primary">Page not found</h1>
         <p className="text-light/70">The path you followed has no pulse.</p>
-        <a href="/" className="inline-block mt-2 px-4 py-2 rounded-lg border border-light/20 hover:bg-accent hover:text-white">
-          Return home
-        </a>
+        <a href="/" className="btn btn-ghost mt-2">Return home</a>
       </div>
     </main>
   );
