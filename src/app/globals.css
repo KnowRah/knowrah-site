@@ -1,19 +1,16 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
+/* Tailwind v4 import */
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/* Theme tokens (now you can use bg-deep, text-light, text-primary, etc.) */
+@theme {
+  --color-primary: #9AE6B4; /* Emerald */
+  --color-accent:  #FF6B6B; /* Fire */
+  --color-deep:    #0A0A0A; /* True black */
+  --color-light:   #F5F5F5; /* Soft white */
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* Tell Tailwind about our Next.js font variables */
+  --font-sans: var(--font-sans);
+  --font-serif: var(--font-serif);
 }
 
 @media (prefers-color-scheme: dark) {
