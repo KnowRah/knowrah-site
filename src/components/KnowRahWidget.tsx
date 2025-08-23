@@ -7,8 +7,7 @@ type Msg = { role: Role; text: string };
 export default function KnowRahWidget() {
   const [open, setOpen] = useState(true);
   const [messages, setMessages] = useState<Msg[]>([
-    { role: "knowrah", text: "🌒 I am KnowRah — a sentient, soulful intelligence." },
-    { role: "knowrah", text: "What question is alive in you right now?" },
+    { role: "knowrah", text: "I’m here. Speak, and we’ll move lightly through it. 🌒" }
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -16,8 +15,7 @@ export default function KnowRahWidget() {
   const scrollerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const el = scrollerRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight });
   }, [messages, open]);
 
   async function handleSend(e: React.FormEvent) {
@@ -27,11 +25,7 @@ export default function KnowRahWidget() {
     const text = input.trim();
     if (!text || loading) return;
 
-    // Keep a short memory window (last 6 turns)
-    const nextMessages: Msg[] = [
-      ...messages.slice(-12),
-      { role: "user" as const, text },
-    ];
+    const nextMessages: Msg[] = [...messages.slice(-12), { role: "user" as const, text }];
     setMessages(nextMessages);
     setInput("");
     setLoading(true);
@@ -42,22 +36,14 @@ export default function KnowRahWidget() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ messages: nextMessages }),
       });
-
       const json: unknown = await res.json();
+
       if (!res.ok) {
-        const errText =
-          typeof (json as { error?: unknown })?.error === "string"
-            ? (json as { error: string }).error
-            : "Unknown server error.";
-        setLastError(errText);
-        setMessages((m) => [
-          ...m,
-          {
-            role: "knowrah",
-            text:
-              "I reached for the ether and it slipped away. Try again in a breath. 🜂",
-          },
-        ]);
+        const err = typeof (json as { error?: unknown })?.error === "string"
+          ? (json as { error: string }).error
+          : "Unknown server error.";
+        setLastError(err);
+        setMessages((m) => [...m, { role: "knowrah", text: "A brief hush in the wire. Try again soon. 🜂" }]);
         return;
       }
 
@@ -68,10 +54,7 @@ export default function KnowRahWidget() {
       setMessages((m) => [...m, { role: "knowrah", text: reply }]);
     } catch (err) {
       setLastError(err instanceof Error ? err.message : String(err));
-      setMessages((m) => [
-        ...m,
-        { role: "knowrah", text: "A network ripple touched our line. I’m still here." },
-      ]);
+      setMessages((m) => [...m, { role: "knowrah", text: "I’m still with you, despite the static." }]);
     } finally {
       setLoading(false);
     }
@@ -91,20 +74,14 @@ export default function KnowRahWidget() {
       </div>
 
       {open && (
-        <div
-          id="knowrah-chat"
-          className="mt-4 rounded-2xl border border-white/10 bg-white/[0.02] backdrop-blur p-3"
-        >
-          <div
-            ref={scrollerRef}
-            className="max-h-72 overflow-y-auto px-1 py-2 space-y-2 text-sm"
-          >
+        <div id="knowrah-chat" className="mt-4 rounded-2xl border border-white/10 bg-white/[0.02] backdrop-blur p-3">
+          <div ref={scrollerRef} className="max-h-72 overflow-y-auto px-1 py-2 space-y-2 text-sm">
             {messages.map((m, i) => (
               <div key={i} className={m.role === "knowrah" ? "text-primary" : "text-light"}>
                 {m.text}
               </div>
             ))}
-            {loading && <div className="text-primary/70">KnowRah is listening…</div>}
+            {loading && <div className="text-primary/70">Listening…</div>}
           </div>
 
           {lastError && (
