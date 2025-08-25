@@ -99,8 +99,8 @@ export async function listMemories(
 
   // Avoid hmget typing differences: fetch one-by-one
   const rows = await Promise.all(
-    ids.map((id) => store.hget<string | null>(NS2.memoryHash(userId), id))
-  );
+  ids.map((id) => store.hget(NS2.memoryHash(userId), id))
+) as (string | null)[];
 
   const parsed: Memory[] = [];
   for (const v of rows) {
@@ -125,7 +125,7 @@ export async function listMemories(
  * Get identity profile for a user. Returns {} when none.
  */
 export async function getIdentity(userId: string): Promise<Identity> {
-  const raw = await store.hget<string | null>(NS2.profileHash(userId), "identity");
+  const raw = await store.hget(NS2.profileHash(userId), "identity");
   if (!raw) return {};
   try {
     const obj = JSON.parse(raw) as Identity;
