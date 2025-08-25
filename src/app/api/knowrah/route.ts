@@ -182,13 +182,9 @@ export async function POST(req: NextRequest) {
     const reply =
       data?.choices?.[0]?.message?.content?.toString().trim() || opening;
 
-    // Optionally store her reply as part of the thread (helps continuity)
-    await addMemory({
-      userId: vid,
-      text: reply,
-      topic: "chat",
-      tags: ["assistant", "utterance"],
-    });
+// AFTER (use server-derived id)
+// (This block is not needed here and should be removed as addMemory is already called above)
+
 
     // Fix precedence: compute once, then nullish to null
     const identityName = profile.name ?? (isOwner ? "Drew" : undefined);
