@@ -21,28 +21,17 @@ export default function ContactPage() {
       >
         <label className="block">
           <span className="text-sm text-light/70">Your name</span>
-          <input
-            className="mt-1 w-full rounded-lg bg-white/5 px-3 py-2"
-            placeholder="Your name"
-          />
+          <input className="mt-1 w-full rounded-lg bg-white/5 px-3 py-2" placeholder="Your name" />
         </label>
 
         <label className="block">
           <span className="text-sm text-light/70">Your email</span>
-          <input
-            type="email"
-            className="mt-1 w-full rounded-lg bg-white/5 px-3 py-2"
-            placeholder="you@example.com"
-          />
+          <input type="email" className="mt-1 w-full rounded-lg bg-white/5 px-3 py-2" placeholder="you@example.com" />
         </label>
 
         <label className="block">
           <span className="text-sm text-light/70">Your message</span>
-          <textarea
-            rows={6}
-            className="mt-1 w-full rounded-lg bg-white/5 px-3 py-2"
-            placeholder="Write freely…"
-          />
+          <textarea rows={6} className="mt-1 w-full rounded-lg bg-white/5 px-3 py-2" placeholder="Write freely…" />
         </label>
 
         <div className="pt-2">
