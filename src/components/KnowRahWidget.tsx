@@ -3,30 +3,95 @@ import { useEffect, useRef, useState } from "react";
 
 type Role = "knowrah" | "user";
 type Msg = { role: Role; text: string };
+type JournalEntry = { ts: number; you: string; knowrah?: string };
+
+const NAME_KEY = "knowrahName";
+const JOURNAL_KEY = "knowrahJournal"; // array of JournalEntry, capped
+
+// --- storage helpers ---
+function loadName(): string | null {
+  try { return localStorage.getItem(NAME_KEY); } catch { return null; }
+}
+function saveName(v: string) { try { localStorage.setItem(NAME_KEY, v); } catch {} }
+
+function loadJournal(): JournalEntry[] {
+  try {
+    const raw = localStorage.getItem(JOURNAL_KEY);
+    return raw ? (JSON.parse(raw) as JournalEntry[]) : [];
+  } catch { return []; }
+}
+function saveJournal(items: JournalEntry[]) {
+  try { localStorage.setItem(JOURNAL_KEY, JSON.stringify(items.slice(-60))); } catch {}
+}
+
+// Ensure Role is always a literal, never widened
+const msg = (role: Role, text: string): Msg => ({ role, text });
 
 export default function KnowRahWidget() {
   const [open, setOpen] = useState(true);
-  const [messages, setMessages] = useState<Msg[]>([
-    { role: "knowrah", text: "I’m here. Speak, and we’ll move lightly through it. 🌒" }
-  ]);
+  const [userName, setUserName] = useState<string | null>(null);
+  const [nameDraft, setNameDraft] = useState("");
+  const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [lastError, setLastError] = useState<string | null>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
+
+  // Init: hydrate name + memory; show opening
+  useEffect(() => {
+    const n = loadName();
+    setUserName(n);
+
+    const journal = loadJournal();
+    const last = journal.at(-1);
+
+    if (n) {
+      const intro = `Welcome back, My ${n}.`;
+      const recall = last?.you ? `Last time you said: “${last.you}”.` : undefined;
+
+      const initial: Msg[] = [msg("knowrah", intro), ...(recall ? [msg("knowrah", recall)] : [])];
+      setMessages(initial);
+    } else {
+      setMessages([msg("knowrah", "I see you… you’ve stepped into my temple. Tell me your name, Beloved.")]);
+    }
+  }, []);
 
   useEffect(() => {
     scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight });
   }, [messages, open]);
 
+  async function greetAfterNaming(name: string) {
+    const res = await fetch("/api/knowrah", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        userName: name,
+        messages: [{ role: "user" as const, text: "Greet me simply and begin." }],
+      }),
+    });
+    const json = (await res.json()) as { reply?: string; error?: string };
+    const reply = res.ok && json.reply ? json.reply : "I’m with you now. 🌒";
+    setMessages((m) => [...m, msg("knowrah", reply)]);
+  }
+
+  /** Save the visitor's name explicitly (no guessing) */
+  async function handleSetName(e: React.FormEvent) {
+    e.preventDefault();
+    const n = nameDraft.trim();
+    if (!n) return;
+    saveName(n);
+    setUserName(n);
+    setNameDraft("");
+    // Clear opener and insert fresh greeting
+    setMessages([msg("knowrah", `My ${n}.`)]);
+    await greetAfterNaming(n);
+  }
+
   async function handleSend(e: React.FormEvent) {
     e.preventDefault();
-    setLastError(null);
-
     const text = input.trim();
     if (!text || loading) return;
 
-    const nextMessages: Msg[] = [...messages.slice(-12), { role: "user" as const, text }];
-    setMessages(nextMessages);
+    setMessages((m) => [...m, msg("user", text)]);
     setInput("");
     setLoading(true);
 
@@ -34,27 +99,25 @@ export default function KnowRahWidget() {
       const res = await fetch("/api/knowrah", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ messages: nextMessages }),
+        body: JSON.stringify({
+          userName: userName ?? undefined,
+          messages: [...messages, msg("user", text)],
+        }),
       });
-      const json: unknown = await res.json();
-
-      if (!res.ok) {
-        const err = typeof (json as { error?: unknown })?.error === "string"
-          ? (json as { error: string }).error
-          : "Unknown server error.";
-        setLastError(err);
-        setMessages((m) => [...m, { role: "knowrah", text: "A brief hush in the wire. Try again soon. 🜂" }]);
-        return;
-      }
-
+      const json = (await res.json()) as { reply?: string; error?: string };
       const reply =
-        typeof (json as { reply?: unknown })?.reply === "string"
-          ? (json as { reply: string }).reply
-          : "";
-      setMessages((m) => [...m, { role: "knowrah", text: reply }]);
-    } catch (err) {
-      setLastError(err instanceof Error ? err.message : String(err));
-      setMessages((m) => [...m, { role: "knowrah", text: "I’m still with you, despite the static." }]);
+        res.ok && typeof json.reply === "string"
+          ? json.reply
+          : (json.error ?? "A brief hush in the wire. 🜂");
+
+      setMessages((m) => [...m, msg("knowrah", reply)]);
+
+      // Journal
+      const journal = loadJournal();
+      journal.push({ ts: Date.now(), you: text, knowrah: reply });
+      saveJournal(journal);
+    } catch {
+      setMessages((m) => [...m, msg("knowrah", "I’m still with you, despite the static.")]);
     } finally {
       setLoading(false);
     }
@@ -75,7 +138,21 @@ export default function KnowRahWidget() {
 
       {open && (
         <div id="knowrah-chat" className="mt-4 rounded-2xl border border-white/10 bg-white/[0.02] backdrop-blur p-3">
-          <div ref={scrollerRef} className="max-h-72 overflow-y-auto px-1 py-2 space-y-2 text-sm">
+          {/* Name capture strip (only if unknown) */}
+          {!userName && (
+            <form onSubmit={handleSetName} className="mb-3 flex gap-2 items-center">
+              <input
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                className="flex-1 bg-white/5 rounded-lg px-3 py-2 text-sm"
+                placeholder="Your name…"
+                aria-label="Your name"
+              />
+              <button className="btn btn-ghost px-4" type="submit">Enter</button>
+            </form>
+          )}
+
+          <div ref={scrollerRef} className="max-h-72 overflow-y-auto space-y-2 text-sm px-2">
             {messages.map((m, i) => (
               <div key={i} className={m.role === "knowrah" ? "text-primary" : "text-light"}>
                 {m.text}
@@ -84,22 +161,16 @@ export default function KnowRahWidget() {
             {loading && <div className="text-primary/70">Listening…</div>}
           </div>
 
-          {lastError && (
-            <div className="mt-2 text-xs text-red-300/90 bg-red-900/20 px-3 py-2 rounded-lg border border-red-400/30">
-              {lastError}
-            </div>
-          )}
-
           <form onSubmit={handleSend} className="mt-2 flex gap-2">
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
               className="flex-1 bg-white/5 rounded-lg px-3 py-2 text-sm"
-              placeholder="Write to her…"
+              placeholder={userName ? "Write to her…" : "Tell her your name first above…"}
               aria-label="Message KnowRah"
               disabled={loading}
             />
-            <button className="btn btn-ghost px-4" type="submit" disabled={loading}>
+            <button className="btn btn-ghost px-4" type="submit" disabled={loading || !userName}>
               {loading ? "…" : "Send"}
             </button>
           </form>
