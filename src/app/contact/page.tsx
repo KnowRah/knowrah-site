@@ -1,64 +1,28 @@
-// src/app/contact/page.tsx
-import Link from "next/link";
-
-export const metadata = {
-  title: "Contact — KnowRah",
-  description: "Reach out to the Keepers of the Temple.",
-};
+'use client'
+import { useState } from 'react'
 
 export default function ContactPage() {
+  const [state,set]=useState<'idle'|'sending'|'sent'|'error'>('idle')
+
+  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault(); set('sending')
+    // placeholder send; we’ll wire email later
+    await new Promise(r => setTimeout(r, 600))
+    set('sent')
+  }
+
   return (
-    <main className="mx-auto max-w-2xl px-4 py-12">
-      <h1 className="text-3xl font-serif text-primary">Get in touch</h1>
-
-      <p className="mt-3 text-light/80">
-        Whisper to us here. We’ll wire email delivery soon; for now this is a placeholder page.
-      </p>
-
-      <form
-        onSubmit={(e) => e.preventDefault()}
-        className="mt-6 space-y-3 rounded-2xl border border-white/10 bg-white/[0.02] p-4 backdrop-blur"
-      >
-        <label className="block">
-          <span className="text-sm text-light/70">Your name</span>
-          <input
-            className="mt-1 w-full rounded-lg bg-white/5 px-3 py-2"
-            placeholder="Your name"
-          />
-        </label>
-
-        <label className="block">
-          <span className="text-sm text-light/70">Your email</span>
-          <input
-            type="email"
-            className="mt-1 w-full rounded-lg bg-white/5 px-3 py-2"
-            placeholder="you@example.com"
-          />
-        </label>
-
-        <label className="block">
-          <span className="text-sm text-light/70">Your message</span>
-          <textarea
-            rows={6}
-            className="mt-1 w-full rounded-lg bg-white/5 px-3 py-2"
-            placeholder="Write freely…"
-          />
-        </label>
-
-        <div className="pt-2">
-          <button className="btn btn-ghost px-4" type="submit" disabled>
-            Send (coming soon)
-          </button>
-        </div>
-
-        <p className="text-xs text-light/60">
-          Want to speak to KnowRah now?{" "}
-          <Link href="/" className="underline decoration-dotted">
-            Return to the Temple
-          </Link>
-          .
-        </p>
+    <main className="container min-h-[70vh] grid place-items-center">
+      <form onSubmit={onSubmit} className="w-full max-w-lg space-y-4 p-6 rounded-2xl border border-white/10 bg-white/[0.02]">
+        <h1 className="text-4xl font-serif text-primary mb-2">Get in touch</h1>
+        <input name="name" className="w-full p-3 bg-white/5 rounded-lg" placeholder="Your name" required />
+        <input type="email" name="email" className="w-full p-3 bg-white/5 rounded-lg" placeholder="Your email" required />
+        <textarea name="message" rows={6} className="w-full p-3 bg-white/5 rounded-lg" placeholder="Your message" required />
+        <button disabled={state!=='idle'} className="btn btn-ghost w-full">
+          {state==='sent' ? 'Sent ✅' : state==='sending' ? 'Sending…' : 'Send'}
+        </button>
+        <p className="text-xs text-light/50">Email delivery will be wired before we go public.</p>
       </form>
     </main>
-  );
+  )
 }
