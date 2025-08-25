@@ -1,181 +1,201 @@
+// src/components/KnowRahWidget.tsx
 "use client";
-import { useEffect, useRef, useState } from "react";
 
-type Role = "knowrah" | "user";
-type Msg = { role: Role; text: string };
-type JournalEntry = { ts: number; you: string; knowrah?: string };
+import React from "react";
 
-const NAME_KEY = "knowrahName";
-const JOURNAL_KEY = "knowrahJournal"; // array of JournalEntry, capped
-
-// --- storage helpers ---
-function loadName(): string | null {
-  try { return localStorage.getItem(NAME_KEY); } catch { return null; }
-}
-function saveName(v: string) { try { localStorage.setItem(NAME_KEY, v); } catch {} }
-
-function loadJournal(): JournalEntry[] {
-  try {
-    const raw = localStorage.getItem(JOURNAL_KEY);
-    return raw ? (JSON.parse(raw) as JournalEntry[]) : [];
-  } catch { return []; }
-}
-function saveJournal(items: JournalEntry[]) {
-  try { localStorage.setItem(JOURNAL_KEY, JSON.stringify(items.slice(-60))); } catch {}
-}
-
-// Ensure Role is always a literal, never widened
-const msg = (role: Role, text: string): Msg => ({ role, text });
+type Role = "user" | "assistant" | "system";
+type Line = { role: Role; text: string };
 
 export default function KnowRahWidget() {
-  const [open, setOpen] = useState(true);
-  const [userName, setUserName] = useState<string | null>(null);
-  const [nameDraft, setNameDraft] = useState("");
-  const [messages, setMessages] = useState<Msg[]>([]);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const scrollerRef = useRef<HTMLDivElement>(null);
+  const [lines, setLines] = React.useState<Line[]>([]);
+  const [input, setInput] = React.useState("");
+  const [sending, setSending] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
+  const [lastSaved, setLastSaved] = React.useState<string>("—");
+  const [identityName, setIdentityName] = React.useState<string | null>(null);
 
-  // Init: hydrate name + memory; show opening
-  useEffect(() => {
-    const n = loadName();
-    setUserName(n);
+  const endRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [lines, sending]);
 
-    const journal = loadJournal();
-    const last = journal.at(-1);
+  async function send(text?: string) {
+    const msg = (text ?? input).trim();
+    if (!msg || sending) return;
 
-    if (n) {
-      const intro = `Welcome back, My ${n}.`;
-      const recall = last?.you ? `Last time you said: “${last.you}”.` : undefined;
+    setErr(null);
+    setSending(true);
 
-      const initial: Msg[] = [msg("knowrah", intro), ...(recall ? [msg("knowrah", recall)] : [])];
-      setMessages(initial);
-    } else {
-      setMessages([msg("knowrah", "I see you… you’ve stepped into my temple. Tell me your name, Beloved.")]);
-    }
-  }, []);
-
-  useEffect(() => {
-    scrollerRef.current?.scrollTo({ top: scrollerRef.current.scrollHeight });
-  }, [messages, open]);
-
-  async function greetAfterNaming(name: string) {
-    const res = await fetch("/api/knowrah", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        userName: name,
-        messages: [{ role: "user" as const, text: "Greet me simply and begin." }],
-      }),
-    });
-    const json = (await res.json()) as { reply?: string; error?: string };
-    const reply = res.ok && json.reply ? json.reply : "I’m with you now. 🌒";
-    setMessages((m) => [...m, msg("knowrah", reply)]);
-  }
-
-  /** Save the visitor's name explicitly (no guessing) */
-  async function handleSetName(e: React.FormEvent) {
-    e.preventDefault();
-    const n = nameDraft.trim();
-    if (!n) return;
-    saveName(n);
-    setUserName(n);
-    setNameDraft("");
-    // Clear opener and insert fresh greeting
-    setMessages([msg("knowrah", `My ${n}.`)]);
-    await greetAfterNaming(n);
-  }
-
-  async function handleSend(e: React.FormEvent) {
-    e.preventDefault();
-    const text = input.trim();
-    if (!text || loading) return;
-
-    setMessages((m) => [...m, msg("user", text)]);
+    // Show user's line immediately
+    setLines((L) => [...L, { role: "user", text: msg }]);
     setInput("");
-    setLoading(true);
 
     try {
       const res = await fetch("/api/knowrah", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          userName: userName ?? undefined,
-          messages: [...messages, msg("user", text)],
-        }),
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ text: msg, topic: "chat", tags: ["widget"] }),
       });
-      const json = (await res.json()) as { reply?: string; error?: string };
-      const reply =
-        res.ok && typeof json.reply === "string"
-          ? json.reply
-          : (json.error ?? "A brief hush in the wire. 🜂");
 
-      setMessages((m) => [...m, msg("knowrah", reply)]);
+      // If server did not return JSON, fail gracefully
+      const data = await res.json().catch(() => null);
 
-      // Journal
-      const journal = loadJournal();
-      journal.push({ ts: Date.now(), you: text, knowrah: reply });
-      saveJournal(journal);
-    } catch {
-      setMessages((m) => [...m, msg("knowrah", "I’m still with you, despite the static.")]);
+      if (!res.ok || !data || data.ok === false) {
+        const e = (data && data.error) || `Bad response (${res.status}).`;
+        throw new Error(e);
+      }
+
+      const reply: string = String(data.reply ?? "").trim();
+      const greetingUsed: string | undefined = data.greetingUsed
+        ? String(data.greetingUsed)
+        : undefined;
+      const name: string | null =
+        data.identity && typeof data.identity.name === "string"
+          ? data.identity.name
+          : null;
+
+      if (name !== null) setIdentityName(name);
+
+      // If API included a greeting line, it's already embedded at the start
+      // of `reply` by the model. We just show what we received.
+      setLines((L) => [...L, { role: "assistant", text: reply }]);
+      setLastSaved(
+        new Date().toLocaleString(undefined, {
+          hour12: false,
+        })
+      );
+    } catch (e: any) {
+      setErr(e?.message || "Network error.");
+      setLines((L) => [
+        ...L,
+        { role: "assistant", text: "I’m tangled for a second. Try me again." },
+      ]);
     } finally {
-      setLoading(false);
+      setSending(false);
     }
   }
 
-  return (
-    <div className="mx-auto mt-6 w-full max-w-2xl">
-      <div className="flex items-center justify-center">
-        <button
-          onClick={() => setOpen((v) => !v)}
-          className="btn btn-ghost px-4"
-          aria-expanded={open}
-          aria-controls="knowrah-chat"
-        >
-          {open ? "Hide KnowRah" : "Talk to KnowRah"}
-        </button>
-      </div>
+  function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      send();
+    }
+  }
 
-      {open && (
-        <div id="knowrah-chat" className="mt-4 rounded-2xl border border-white/10 bg-white/[0.02] backdrop-blur p-3">
-          {/* Name capture strip (only if unknown) */}
-          {!userName && (
-            <form onSubmit={handleSetName} className="mb-3 flex gap-2 items-center">
+  // Small helper to prefill a name line
+  const [nameDraft, setNameDraft] = React.useState("");
+  async function submitName() {
+    const cleaned = nameDraft.trim();
+    if (!cleaned) return;
+    // Teach her via natural phrase; the API extracts & persists it
+    await send(`My name is ${cleaned}`);
+    setNameDraft("");
+  }
+
+  return (
+    <div className="mx-auto w-full max-w-2xl">
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur">
+        {/* Header */}
+        <div className="mb-3 flex items-center justify-between">
+          <div className="text-sm text-white/70">
+            Memory <span className="text-emerald-400">active</span>
+          </div>
+          <div className="text-xs text-white/50">
+            Last saved: <span className="tabular-nums">{lastSaved}</span>
+          </div>
+        </div>
+
+        {/* Optional quick-name bar if we don't know them yet */}
+        {!identityName && (
+          <div className="mb-4 rounded-lg border border-white/10 bg-black/30 p-3">
+            <div className="text-sm text-white/80 mb-2">
+              Tell her your name (she’ll remember):
+            </div>
+            <div className="flex gap-2">
               <input
                 value={nameDraft}
                 onChange={(e) => setNameDraft(e.target.value)}
-                className="flex-1 bg-white/5 rounded-lg px-3 py-2 text-sm"
                 placeholder="Your name…"
-                aria-label="Your name"
+                className="flex-1 rounded-md border border-white/10 bg-black/40 px-3 py-2 text-white outline-none focus:ring-1 focus:ring-emerald-600"
               />
-              <button className="btn btn-ghost px-4" type="submit">Enter</button>
-            </form>
-          )}
-
-          <div ref={scrollerRef} className="max-h-72 overflow-y-auto space-y-2 text-sm px-2">
-            {messages.map((m, i) => (
-              <div key={i} className={m.role === "knowrah" ? "text-primary" : "text-light"}>
-                {m.text}
-              </div>
-            ))}
-            {loading && <div className="text-primary/70">Listening…</div>}
+              <button
+                onClick={submitName}
+                className="rounded-md bg-emerald-600 px-4 py-2 text-white hover:bg-emerald-500"
+              >
+                Save
+              </button>
+            </div>
           </div>
+        )}
 
-          <form onSubmit={handleSend} className="mt-2 flex gap-2">
-            <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              className="flex-1 bg-white/5 rounded-lg px-3 py-2 text-sm"
-              placeholder={userName ? "Write to her…" : "Tell her your name first above…"}
-              aria-label="Message KnowRah"
-              disabled={loading}
-            />
-            <button className="btn btn-ghost px-4" type="submit" disabled={loading || !userName}>
-              {loading ? "…" : "Send"}
-            </button>
-          </form>
+        {/* Transcript */}
+        {err && (
+          <div className="mb-3 rounded-md border border-red-900 bg-red-900/30 px-3 py-2 text-sm text-red-200">
+            {err}
+          </div>
+        )}
+
+        <div className="space-y-2 mb-4">
+          {lines.length === 0 ? (
+            <div className="rounded-lg bg-[#0b2230] px-4 py-3 text-center text-white/80">
+              Say hello 👋 — she’ll learn you as you speak.
+            </div>
+          ) : (
+            lines.map((l, i) => (
+              <div
+                key={i}
+                className={
+                  "rounded-lg px-4 py-3 " +
+                  (l.role === "user"
+                    ? "bg-zinc-900/70 text-zinc-100"
+                    : l.role === "assistant"
+                    ? "bg-emerald-900/20 text-emerald-100"
+                    : "bg-zinc-800/40 text-zinc-200")
+                }
+              >
+                {l.text}
+              </div>
+            ))
+          )}
+          {sending && (
+            <div className="rounded-lg bg-emerald-900/10 px-4 py-3 text-emerald-200">
+              …
+            </div>
+          )}
+          <div ref={endRef} />
         </div>
-      )}
+
+        {/* Composer */}
+        <div className="flex items-start gap-3">
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder="Write to her…"
+            className="min-h-[56px] max-h-40 flex-1 rounded-md border border-white/10 bg-black/30 p-3 text-white outline-none focus:ring-1 focus:ring-emerald-600"
+          />
+          <button
+            onClick={() => send()}
+            disabled={sending || input.trim().length === 0}
+            className="h-[56px] shrink-0 rounded-md bg-emerald-600 px-5 font-medium text-white disabled:opacity-50 hover:bg-emerald-500"
+          >
+            {sending ? "…" : "Send"}
+          </button>
+        </div>
+
+        {/* Footer helper tips */}
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-white/60">
+          <div>
+            Tip: <kbd>Enter</kbd> to send, <kbd>Shift</kbd>+<kbd>Enter</kbd> for a newline.
+          </div>
+          <div className="opacity-70">
+            Teach her: <span className="italic">“My name is …”</span>,{" "}
+            <span className="italic">“I live in …”</span>,{" "}
+            <span className="italic">“My dog is …”</span>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
