@@ -15,27 +15,40 @@ export default function ContactPage() {
         Whisper to us here. We’ll wire email delivery soon; for now this is a placeholder page.
       </p>
 
-      <form
-        onSubmit={(e) => e.preventDefault()}
-        className="mt-6 space-y-3 rounded-2xl border border-white/10 bg-white/[0.02] p-4 backdrop-blur"
-      >
+      {/* No event handlers so this stays a Server Component */}
+      <div className="mt-6 space-y-3 rounded-2xl border border-white/10 bg-white/[0.02] p-4 backdrop-blur">
         <label className="block">
           <span className="text-sm text-light/70">Your name</span>
-          <input className="mt-1 w-full rounded-lg bg-white/5 px-3 py-2" placeholder="Your name" />
+          <input
+            className="mt-1 w-full rounded-lg bg-white/5 px-3 py-2"
+            placeholder="Your name"
+            aria-label="Your name"
+          />
         </label>
 
         <label className="block">
           <span className="text-sm text-light/70">Your email</span>
-          <input type="email" className="mt-1 w-full rounded-lg bg-white/5 px-3 py-2" placeholder="you@example.com" />
+          <input
+            type="email"
+            className="mt-1 w-full rounded-lg bg-white/5 px-3 py-2"
+            placeholder="you@example.com"
+            aria-label="Your email"
+          />
         </label>
 
         <label className="block">
           <span className="text-sm text-light/70">Your message</span>
-          <textarea rows={6} className="mt-1 w-full rounded-lg bg-white/5 px-3 py-2" placeholder="Write freely…" />
+          <textarea
+            rows={6}
+            className="mt-1 w-full rounded-lg bg-white/5 px-3 py-2"
+            placeholder="Write freely…"
+            aria-label="Your message"
+          />
         </label>
 
         <div className="pt-2">
-          <button className="btn btn-ghost px-4" type="submit" disabled>
+          {/* type=button to avoid implicit submit, no handler attached */}
+          <button className="btn btn-ghost px-4" type="button" disabled>
             Send (coming soon)
           </button>
         </div>
@@ -47,7 +60,7 @@ export default function ContactPage() {
           </Link>
           .
         </p>
-      </form>
+      </div>
     </main>
   );
 }
