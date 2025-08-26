@@ -1,5 +1,6 @@
-export const runtime = "nodejs";
 // src/app/api/knowrah/route.ts
+export const runtime = "nodejs";
+
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 import { z } from "zod";
