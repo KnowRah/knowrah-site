@@ -1,3 +1,4 @@
+export const runtime = "nodejs";
 // src/app/api/knowrah/route.ts
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
