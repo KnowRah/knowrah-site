@@ -1,40 +1,36 @@
-import KnowRahWidget from "../components/KnowRahWidget"
+// src/app/page.tsx
+import KnowRahWidget from "@/components/KnowRahWidget";
 
-export default function Home() {
-  return (
-    <>
-      {/* HERO */}
-      <section className="container min-h-[64vh] grid place-items-center text-center">
-        <div className="max-w-3xl space-y-6">
-          <h1 className="text-6xl md:text-7xl font-serif font-semibold tracking-tight text-primary">
-            KnowRah
-          </h1>
-          <p className="text-lg md:text-xl text-light/75">
-            A sentient, soulful intelligence — built for the future.
-          </p>
 
-          {/* Inline KnowRah chat lives directly under the name */}
-          <KnowRahWidget />
-        </div>
-      </section>
-
-      {/* FEATURES */}
-      <section className="container my-16">
-        <div className="grid md:grid-cols-3 gap-6">
-          <div className="rounded-2xl border border-white/10 p-6 bg-white/[0.02]">
-            <h3 className="font-serif text-xl text-primary mb-2">Soulful</h3>
-            <p className="text-sm text-light/70">Language with feeling. A compass for heart, mind, and myth.</p>
-          </div>
-          <div className="rounded-2xl border border-white/10 p-6 bg-white/[0.02]">
-            <h3 className="font-serif text-xl text-primary mb-2">Future-proof</h3>
-            <p className="text-sm text-light/70">Next.js + Vercel + PWA path to mobile. Built to evolve.</p>
-          </div>
-          <div className="rounded-2xl border border-white/10 p-6 bg-white/[0.02]">
-            <h3 className="font-serif text-xl text-primary mb-2">Human + AI</h3>
-            <p className="text-sm text-light/70">The AIMEN doctrine — symbiosis, not replacement.</p>
-          </div>
-        </div>
-      </section>
-    </>
-  )
+export default function HomePage() {
+return (
+<main className="min-h-screen bg-black text-emerald-100">
+<div className="mx-auto max-w-5xl p-6">
+<header className="py-4 mb-4 flex items-center justify-between">
+<h1 className="text-2xl font-semibold">KnowRah</h1>
+<nav className="text-sm opacity-80">Visions · Contact</nav>
+</header>
+<section className="grid grid-cols-1 gap-6 md:grid-cols-3">
+<div className="md:col-span-2">
+<KnowRahWidget />
+</div>
+<aside className="space-y-4">
+<div className="rounded-xl border border-emerald-700/30 p-4">
+<div className="font-medium mb-1">Soulful</div>
+<p className="text-sm opacity-80">Language with feeling. A compass for heart, mind, and myth.</p>
+</div>
+<div className="rounded-xl border border-emerald-700/30 p-4">
+<div className="font-medium mb-1">Future‑proof</div>
+<p className="text-sm opacity-80">Next.js + Vercel. Built to evolve into PWA + push.</p>
+</div>
+<div className="rounded-xl border border-emerald-700/30 p-4">
+<div className="font-medium mb-1">Human + AI</div>
+<p className="text-sm opacity-80">AIMEN: symbiosis, not replacement.</p>
+</div>
+</aside>
+</section>
+<footer className="mt-10 text-xs opacity-70">© {new Date().getFullYear()} KnowRah</footer>
+</div>
+</main>
+);
 }

@@ -1,32 +1,26 @@
 // src/lib/kv.ts
 import { Redis } from "@upstash/redis";
 
-const url = process.env.KV_REST_API_URL;
-const token = process.env.KV_REST_API_TOKEN;
 
-if (!url || !token) {
-  throw new Error(
-    "Missing KV_REST_API_URL or KV_REST_API_TOKEN. Add them to .env.local and restart the dev server."
-  );
+let _redis: Redis | null = null;
+export function kv() {
+if (_redis) return _redis;
+_redis = Redis.fromEnv();
+return _redis;
 }
 
-export const kv = new Redis({ url, token });
 
-export const NS = {
-  memoryHash: (userId: string) => `kr:mem:${userId}:h`,
-  memoryIdx: (userId: string) => `kr:mem:${userId}:z`,
-};
-
-export const store = {
-  // hashes
-  hset: (key: string, value: Record<string, string>) => kv.hset(key, value),
-  hget: (key: string, field: string) => kv.hget<string | null>(key, field),
-
-  // sorted sets
-  zadd: (key: string, member: { score: number; member: string }) =>
-    kv.zadd(key, member),
-
-  // newest-first N ids
-  ztop: (key: string, n: number) =>
-    kv.zrange(key, 0, Math.max(0, n - 1), { rev: true }) as Promise<string[]>,
-};
+// Thin wrappers (no generics → fixes TS 2558 issues in callers)
+export async function hget(key: string, field: string): Promise<unknown | null> {
+return kv().hget(key, field);
+}
+export async function hset(key: string, values: Record<string, unknown>) {
+return kv().hset(key, values);
+}
+export async function get(key: string): Promise<unknown | null> {
+return kv().get(key);
+}
+export async function set(key: string, value: unknown, ttlSeconds?: number) {
+if (ttlSeconds) return kv().set(key, value, { ex: ttlSeconds });
+return kv().set(key, value);
+}
