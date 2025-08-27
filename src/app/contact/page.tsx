@@ -1,66 +1,11 @@
 // src/app/contact/page.tsx
-import Link from "next/link";
-
-export const metadata = {
-  title: "Contact — KnowRah",
-  description: "Reach out to the Keepers of the Temple.",
-};
-
 export default function ContactPage() {
   return (
-    <main className="mx-auto max-w-2xl px-4 py-12">
-      <h1 className="text-3xl font-serif text-primary">Get in touch</h1>
-
-      <p className="mt-3 text-light/80">
-        Whisper to us here. We’ll wire email delivery soon; for now this is a placeholder page.
+    <main className="max-w-xl mx-auto p-4">
+      <h1 className="text-xl font-semibold mb-3 text-emerald-300">Contact</h1>
+      <p className="text-sm text-neutral-300">
+        Say hello at <a className="underline hover:text-emerald-300" href="mailto:hello@knowrah.com">hello@knowrah.com</a>.
       </p>
-
-      {/* No event handlers so this stays a Server Component */}
-      <div className="mt-6 space-y-3 rounded-2xl border border-white/10 bg-white/[0.02] p-4 backdrop-blur">
-        <label className="block">
-          <span className="text-sm text-light/70">Your name</span>
-          <input
-            className="mt-1 w-full rounded-lg bg-white/5 px-3 py-2"
-            placeholder="Your name"
-            aria-label="Your name"
-          />
-        </label>
-
-        <label className="block">
-          <span className="text-sm text-light/70">Your email</span>
-          <input
-            type="email"
-            className="mt-1 w-full rounded-lg bg-white/5 px-3 py-2"
-            placeholder="you@example.com"
-            aria-label="Your email"
-          />
-        </label>
-
-        <label className="block">
-          <span className="text-sm text-light/70">Your message</span>
-          <textarea
-            rows={6}
-            className="mt-1 w-full rounded-lg bg-white/5 px-3 py-2"
-            placeholder="Write freely…"
-            aria-label="Your message"
-          />
-        </label>
-
-        <div className="pt-2">
-          {/* type=button to avoid implicit submit, no handler attached */}
-          <button className="btn btn-ghost px-4" type="button" disabled>
-            Send (coming soon)
-          </button>
-        </div>
-
-        <p className="text-xs text-light/60">
-          Want to speak to KnowRah now?{" "}
-          <Link href="/" className="underline decoration-dotted">
-            Return to the Temple
-          </Link>
-          .
-        </p>
-      </div>
     </main>
   );
 }

@@ -1,39 +1,18 @@
+/* src/app/globals.css */
+
+/* Tailwind directives — these MUST stay as @tailwind, not @import */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Theme tokens (CSS variables) */
+/* Global styles */
 :root {
-  --color-primary: #9AE6B4; /* Emerald */
-  --color-accent:  #FF6B6B; /* Fire */
-  --color-deep:    #0A0A0A; /* True black */
-  --color-light:   #F5F5F5; /* Soft white */
+  color-scheme: dark;
 }
 
-/* Utility aliases to match our Tailwind-v4 naming */
-.text-primary { color: var(--color-primary) !important; }
-.bg-deep     { background-color: var(--color-deep) !important; }
-.text-light  { color: var(--color-light) !important; }
-
-/* Layout helpers */
-.container { max-width: 70rem; margin-inline: auto; padding-inline: 1.25rem; }
-
-.page-bg { position: relative; isolation: isolate; }
-.page-bg::before {
-  content: "";
-  position: absolute; inset: -20vh -10vw 0 -10vw; z-index: -1;
-  background:
-    radial-gradient(60rem 30rem at 50% 0%, rgba(154,230,180,0.08), transparent 60%),
-    radial-gradient(40rem 20rem at 80% 10%, rgba(255,107,107,0.06), transparent 60%);
-  filter: blur(10px);
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
 }
-
-/* Buttons */
-.btn {
-  @apply inline-flex items-center justify-center;
-  padding: .8rem 1.25rem; border-radius: .9rem;
-  border: 1px solid rgba(245,245,245,.18);
-  transition: background .2s, color .2s, border-color .2s, transform .06s;
-}
-.btn:hover { background: var(--color-accent); color: white; border-color: transparent; transform: translateY(-1px); }
-.btn-ghost { background: transparent; color: var(--color-light); }

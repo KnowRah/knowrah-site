@@ -1,26 +1,23 @@
 // src/lib/kv.ts
-import { Redis } from "@upstash/redis";
+type Atom = string | number | boolean | object | null;
 
+class InMemoryKV {
+  private store = new Map<string, Atom>();
+  private sets = new Map<string, Set<string>>();
 
-let _redis: Redis | null = null;
-export function kv() {
-if (_redis) return _redis;
-_redis = Redis.fromEnv();
-return _redis;
+  async get<T = Atom>(key: string): Promise<T | null> {
+    return (this.store.has(key) ? (this.store.get(key) as T) : null);
+  }
+  async set<T = Atom>(key: string, val: T): Promise<void> {
+    this.store.set(key, val as Atom);
+  }
+  async sadd(key: string, member: string): Promise<void> {
+    if (!this.sets.has(key)) this.sets.set(key, new Set());
+    this.sets.get(key)!.add(member);
+  }
+  async smembers(key: string): Promise<string[]> {
+    return Array.from(this.sets.get(key) || []);
+  }
 }
 
-
-// Thin wrappers (no generics → fixes TS 2558 issues in callers)
-export async function hget(key: string, field: string): Promise<unknown | null> {
-return kv().hget(key, field);
-}
-export async function hset(key: string, values: Record<string, unknown>) {
-return kv().hset(key, values);
-}
-export async function get(key: string): Promise<unknown | null> {
-return kv().get(key);
-}
-export async function set(key: string, value: unknown, ttlSeconds?: number) {
-if (ttlSeconds) return kv().set(key, value, { ex: ttlSeconds });
-return kv().set(key, value);
-}
+export const kv = new InMemoryKV();
