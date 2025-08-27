@@ -11,6 +11,7 @@ const IS_CODESPACES =
 
 const STREAM_FALLBACK_MS = IS_CODESPACES ? 2000 : 4000;
 
+// --- identity --------------------------------------------------------------
 function getUserId() {
   if (typeof window === "undefined") return "server";
   let id = localStorage.getItem("kr_user_id");
@@ -21,7 +22,15 @@ function getUserId() {
   return id;
 }
 
-// --- small helpers ---------------------------------------------------------
+// --- time helpers ----------------------------------------------------------
+function getLocalTimeZone(): string {
+  try {
+    // Example: "America/Los_Angeles"
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
 function now() {
   return Date.now();
 }
@@ -32,6 +41,7 @@ export default function KnowRahWidget() {
   const [typing, setTyping] = useState(false);
 
   const userId = useMemo(() => getUserId(), []);
+  const timeZone = useMemo(() => getLocalTimeZone(), []); // <— the important bit
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const hasInit = useRef(false);
 
@@ -83,7 +93,7 @@ export default function KnowRahWidget() {
           const r = await fetch("/api/knowrah", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ userId, action: "nudge" }),
+            body: JSON.stringify({ userId, action: "nudge", timezone: timeZone }),
           });
           const j = await r.json().catch(() => ({} as any));
           if (j?.reply) {
@@ -114,7 +124,7 @@ export default function KnowRahWidget() {
         const r = await fetch("/api/knowrah", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId, action: "init" }),
+          body: JSON.stringify({ userId, action: "init", timezone: timeZone }),
         });
         const j = await r.json().catch(() => ({} as any));
         console.log("[init] reply:", j);
@@ -135,7 +145,7 @@ export default function KnowRahWidget() {
     // kick off idle watcher
     scheduleIdleNudge();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]);
+  }, [userId, timeZone]);
 
   /* ------------------------------ Send helpers --------------------------- */
   async function sendNonStream(text: string) {
@@ -144,7 +154,7 @@ export default function KnowRahWidget() {
       const r = await fetch("/api/knowrah", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, action: "say", message: text }),
+        body: JSON.stringify({ userId, action: "say", message: text, timezone: timeZone }),
       });
       const j = await r.json().catch(() => ({} as any));
       console.log("[non-stream] reply:", j);
@@ -189,7 +199,7 @@ export default function KnowRahWidget() {
           const r = await fetch("/api/knowrah", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ userId, action: "say", message: text }),
+            body: JSON.stringify({ userId, action: "say", message: text, timezone: timeZone }),
           });
           const j = await r.json().catch(() => ({} as any));
           console.log("[stream-fallback] reply:", j);
@@ -209,7 +219,7 @@ export default function KnowRahWidget() {
       const res = await fetch("/api/knowrah/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" },
-        body: JSON.stringify({ userId, message: text }),
+        body: JSON.stringify({ userId, message: text, timezone: timeZone }),
       });
 
       if (!res.body) {

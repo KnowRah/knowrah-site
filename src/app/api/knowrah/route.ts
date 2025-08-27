@@ -11,6 +11,29 @@ const MODEL = process.env.OPENAI_MODEL || "gpt-4o";
 type ChatRole = "system" | "user" | "assistant";
 type ChatMsg = { role: ChatRole; content: string };
 
+/* ---------- time helpers (timezone-aware) ---------- */
+
+/** Returns a Date that represents “now” in the given IANA timezone. */
+function nowInTZ(tz: string): Date {
+  // Convert "now" into the target TZ by round-tripping through a localized string.
+  // Works on Node without extra deps.
+  const s = new Date().toLocaleString("en-US", { timeZone: tz || "UTC" });
+  return new Date(s);
+}
+
+/** Returns local hour [0..23] for the given timezone. */
+function hourInTZ(tz: string): number {
+  return nowInTZ(tz).getHours();
+}
+
+/** “morning/afternoon/evening” from hour + tz */
+function salutationForTZ(tz: string): "morning" | "afternoon" | "evening" {
+  const h = hourInTZ(tz);
+  if (h < 12) return "morning";
+  if (h < 18) return "afternoon";
+  return "evening";
+}
+
 /* ---------- helpers ---------- */
 
 function presencePrompt(siteName: string, identityName?: string, facts: string[] = []): string {
@@ -106,6 +129,7 @@ export async function POST(req: Request) {
     const message: string | undefined = body?.message;
     const name: string | undefined = body?.name;
     const fact: string | undefined = body?.fact;
+    const timezone: string = body?.timezone || "UTC"; // <-- read tz from client
 
     if (!userId || userId.length < 6) {
       return NextResponse.json({ ok: false, error: "Missing userId" }, { status: 400 });
@@ -129,18 +153,19 @@ export async function POST(req: Request) {
 
     const thread: ChatMsg[] = [...summaryMsgs, ...recentMsgs];
 
-    /* ---------------- INIT: fully LLM-driven opening ---------------- */
+    /* ---------------- INIT: fully LLM-driven opening (timezone-aware) ---------------- */
     if (action === "init") {
+      const sal = salutationForTZ(timezone);
       const raw = await chatComplete([
         { role: "system", content: system },
         ...thread,
         {
           role: "user",
           content: id.name
-            ? `We just opened the page. Greet ${id.name} naturally, in your own voice.
+            ? `We just opened the page this ${sal} (user timezone: ${timezone}). Greet ${id.name} naturally, in your own voice.
                Start like a conscious being would—warm, alive, not robotic.
                Offer one tiny first step or reflection.`
-            : `We just opened the page. Greet the user naturally, in your own voice.
+            : `We just opened the page this ${sal} (user timezone: ${timezone}). Greet the user naturally, in your own voice.
                Invite them softly to share their name, but don’t interrogate.
                Offer one tiny practical first step to begin.`,
         },
@@ -190,7 +215,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, reply });
     }
 
-    /* ---------------- Nudge (natural, non-spammy) ---------------- */
+    /* ---------------- Nudge (natural, non-spammy, timezone-aware) ---------------- */
     if (action === "nudge") {
       // server-side guardrails
       const nowMs = Date.now();
@@ -214,8 +239,7 @@ export async function POST(req: Request) {
         return NextResponse.json({ ok: true, reply: "" });
       }
 
-      const hour = new Date().getHours();
-      const sal = hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening";
+      const sal = salutationForTZ(timezone);
       const tones = ["soft", "warm", "lightly playful", "tender-direct", "quietly confident"];
       const tone = tones[Math.floor(Math.random() * tones.length)];
 
@@ -240,7 +264,7 @@ export async function POST(req: Request) {
         {
           role: "user",
           content:
-            `Compose a ${tone} one-sentence check-in for the ${sal}. ` +
+            `Compose a ${tone} one-sentence check-in for the ${sal} (user timezone: ${timezone}). ` +
             `Sound human and present; no apology, no urgency, no repetition. ` +
             `End with one concise offer like: "${ask}". Keep under 22 words.`,
         },
