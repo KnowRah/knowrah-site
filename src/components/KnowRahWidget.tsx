@@ -3,10 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 
-// ★ NEW — light client voice + avatar
-// (pure browser APIs; no keys or server changes)
+// ★ light client voice + avatar (pure browser APIs; no keys)
 type VoicePrefs = { enabled: boolean; voiceName: string | null; rate: number };
-
 type Msg = { role: "user" | "assistant"; text: string };
 
 // Codespaces proxies often buffer SSE; prefer non-stream there.
@@ -29,7 +27,6 @@ function getUserId() {
 // --- time helpers ----------------------------------------------------------
 function getLocalTimeZone(): string {
   try {
-    // Example: "America/Los_Angeles"
     return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   } catch {
     return "UTC";
@@ -39,7 +36,7 @@ function now() {
   return Date.now();
 }
 
-// ★ NEW — tiny helpers for voice prefs
+// --- voice prefs -----------------------------------------------------------
 const VOICE_KEY = "knowrah.voice.prefs";
 function loadVoicePrefs(): VoicePrefs {
   if (typeof window === "undefined") return { enabled: true, voiceName: null, rate: 1 };
@@ -56,13 +53,46 @@ function saveVoicePrefs(p: VoicePrefs) {
   } catch {}
 }
 
-// ★ NEW — helper to strip emojis before speaking (keeps them in UI)
+// ★ helper to strip emojis before speaking (keeps them in UI)
 function stripEmojis(text: string): string {
-  // Removes common emoji ranges and variation selectors
   return text.replace(
     /([\u2700-\u27BF]|\uFE0F|[\u2600-\u26FF]|[\uE000-\uF8FF]|[\uD83C-\uDBFF][\uDC00-\uDFFF])/g,
     ""
   );
+}
+
+// ★ BEST-VOICE AUTOPICK (per device)
+function pickBestVoiceName(voicesIn: SpeechSynthesisVoice[]): string | null {
+  const voices = Array.isArray(voicesIn) ? voicesIn : [];
+  if (voices.length === 0) return null;
+
+  const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+  const isIOS = /iPhone|iPad|iPod/i.test(ua);
+  const isAndroid = /Android/i.test(ua);
+
+  const byNameIncludes = (substrs: string[]) =>
+    voices.filter((v) => substrs.some((s) => v.name.toLowerCase().includes(s.toLowerCase())));
+
+  const byLang = (prefix: string) => voices.filter((v) => v.lang?.toLowerCase().startsWith(prefix.toLowerCase()));
+  const english = voices.filter((v) => v.lang?.toLowerCase().startsWith("en"));
+
+  // Prefer device-native high-quality voices
+  if (isIOS) {
+    const siri = byNameIncludes(["siri"]);
+    if (siri.length) return siri[0]!.name;
+  }
+  if (isAndroid) {
+    const google = byNameIncludes(["google"]);
+    if (google.length) return google[0]!.name;
+  }
+
+  // Otherwise prefer English by region
+  for (const group of [byLang("en-gb"), byLang("en-us"), english]) {
+    const list = group ?? [];
+    if (list.length) return list[0]!.name;
+  }
+
+  return voices[0]!.name ?? null;
 }
 
 export default function KnowRahWidget() {
@@ -71,7 +101,7 @@ export default function KnowRahWidget() {
   const [typing, setTyping] = useState(false);
 
   const userId = useMemo(() => getUserId(), []);
-  const timeZone = useMemo(() => getLocalTimeZone(), []); // <— the important bit
+  const timeZone = useMemo(() => getLocalTimeZone(), []);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const hasInit = useRef(false);
 
@@ -81,14 +111,13 @@ export default function KnowRahWidget() {
   const idleDelayMs = useRef<number>(90_000); // first nudge ~90s if truly idle
   const pageHiddenRef = useRef<boolean>(false);
 
-  // ★ NEW — mount gate to avoid hydration mismatches
+  // mount gate to avoid hydration mismatches
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
   function scrollToBottom() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }
-
   useEffect(() => {
     scrollToBottom();
   }, [messages, typing]);
@@ -97,7 +126,6 @@ export default function KnowRahWidget() {
   useEffect(() => {
     function onVis() {
       pageHiddenRef.current = document.visibilityState !== "visible";
-      // if we came back, restart idle window
       if (!pageHiddenRef.current) {
         lastActivity.current = now();
         scheduleIdleNudge();
@@ -120,7 +148,6 @@ export default function KnowRahWidget() {
     clearIdle();
     if (pageHiddenRef.current) return;
     idleTimer.current = window.setTimeout(async () => {
-      // only ask server for a nudge if truly idle (no typing, no recent messages)
       const idleFor = now() - lastActivity.current;
       if (idleFor >= idleDelayMs.current && !typing) {
         try {
@@ -136,7 +163,6 @@ export default function KnowRahWidget() {
           }
         } catch {}
       }
-      // progressive backoff on client (server also enforces)
       idleDelayMs.current = Math.min(idleDelayMs.current * 2, 20 * 60_000); // cap 20 min
       scheduleIdleNudge();
     }, idleDelayMs.current);
@@ -144,7 +170,7 @@ export default function KnowRahWidget() {
 
   function markActive() {
     lastActivity.current = now();
-    idleDelayMs.current = 90_000; // reset back to ~90s after any activity
+    idleDelayMs.current = 90_000;
     scheduleIdleNudge();
   }
 
@@ -176,7 +202,7 @@ export default function KnowRahWidget() {
         markActive();
       }
     })();
-    // kick off idle watcher
+
     scheduleIdleNudge();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, timeZone]);
@@ -317,12 +343,12 @@ export default function KnowRahWidget() {
     }
   }
 
-  // ★ NEW — voice + avatar state
+  // --- voice + avatar state -----------------------------------------------
   const [speaking, setSpeaking] = useState(false);
   const [systemVoices, setSystemVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [voicePrefs, setVoicePrefs] = useState<VoicePrefs>(() => loadVoicePrefs());
 
-  // ★ NEW — Autoplay unlock for production (Vercel) due to browser policy
+  // Autoplay unlock for production (Vercel) due to browser policy
   const [interacted, setInteracted] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     return localStorage.getItem("kr_voice_unlocked") === "1";
@@ -331,9 +357,10 @@ export default function KnowRahWidget() {
     if (interacted) return;
     function unlock() {
       setInteracted(true);
-      try { localStorage.setItem("kr_voice_unlocked", "1"); } catch {}
+      try {
+        localStorage.setItem("kr_voice_unlocked", "1");
+      } catch {}
     }
-    // any gesture will unlock
     window.addEventListener("pointerdown", unlock, { once: true });
     window.addEventListener("keydown", unlock, { once: true });
     window.addEventListener("touchstart", unlock, { once: true });
@@ -347,7 +374,7 @@ export default function KnowRahWidget() {
   // collect the last assistant message for auto-speak
   const lastAssistant = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i]; // guard the lookup
+      const m = messages[i];
       if (!m) continue;
       if (m.role === "assistant") return m.text;
     }
@@ -366,7 +393,24 @@ export default function KnowRahWidget() {
     };
   }, []);
 
-  // ★ NEW — lip-sync mouth state (word-level)
+  // Auto-pick a good local voice per device (without overriding a valid user choice)
+  useEffect(() => {
+    if (systemVoices.length === 0) return;
+    const currentExists = voicePrefs.voiceName
+      ? systemVoices.some((v) => v.name === voicePrefs.voiceName)
+      : false;
+    if (!currentExists) {
+      const best = pickBestVoiceName(systemVoices);
+      if (best) {
+        const next = { ...voicePrefs, voiceName: best };
+        setVoicePrefs(next);
+        saveVoicePrefs(next);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [systemVoices]);
+
+  // lip-sync mouth state (word-level)
   const [mouthOpen, setMouthOpen] = useState(0); // 0..1
   const decayTimer = useRef<number | null>(null);
   function bumpMouth() {
@@ -390,13 +434,12 @@ export default function KnowRahWidget() {
     if (typeof window === "undefined") return;
 
     const synth = window.speechSynthesis;
-    if (!synth) return; // guard for TS
+    if (!synth) return;
 
     try {
       if (synth.speaking) synth.cancel();
-      // ★ use emoji-stripped text
       const cleanText = stripEmojis(lastAssistant);
-      if (!cleanText.trim()) return; // don't read empty
+      if (!cleanText.trim()) return;
       const u = new SpeechSynthesisUtterance(cleanText);
       if (voicePrefs.voiceName) {
         const v = systemVoices.find((vv) => vv.name === voicePrefs.voiceName);
@@ -405,7 +448,7 @@ export default function KnowRahWidget() {
       u.rate = Math.min(2, Math.max(0.5, voicePrefs.rate));
       u.onstart = () => {
         setSpeaking(true);
-        setMouthOpen(0.6); // start with a gentle open
+        setMouthOpen(0.6);
         bumpMouth();
       };
       u.onend = () => {
@@ -424,10 +467,7 @@ export default function KnowRahWidget() {
           decayTimer.current = null;
         }
       };
-      // Word boundary pulses for mouth movement
-      u.onboundary = () => {
-        bumpMouth();
-      };
+      u.onboundary = () => bumpMouth();
 
       const delayMs = systemVoices.length === 0 ? 150 : 0;
       setTimeout(() => synth.speak(u), delayMs);
@@ -443,9 +483,7 @@ export default function KnowRahWidget() {
 
     if (p.enabled === false && typeof window !== "undefined") {
       const synth = window.speechSynthesis;
-      if (synth) {
-        if (synth.speaking) synth.cancel(); // guarded
-      }
+      if (synth && synth.speaking) synth.cancel();
       setSpeaking(false);
       setMouthOpen(0);
       if (decayTimer.current) {
@@ -456,11 +494,11 @@ export default function KnowRahWidget() {
   }
 
   return (
-    <div className="mx-auto max-w-xl w-full p-4">
-      {/* ★ NEW — header with avatar + voice controls */}
+    <div className="mx-auto w-full max-w-xl p-4 pt-[env(safe-area-inset-top)]">
+      {/* header with avatar + voice controls */}
       <div className="mb-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          {/* avatar: subtle breathing; stronger glow when speaking */}
+          {/* avatar */}
           <div
             className={[
               "relative w-16 h-16 rounded-full grid place-items-center",
@@ -473,8 +511,7 @@ export default function KnowRahWidget() {
             title={speaking ? "Speaking" : "Listening"}
           >
             <span className="select-none">🌒</span>
-
-            {/* ★ NEW — simple mouth that lip-syncs (word-level) */}
+            {/* simple mouth that lip-syncs (word-level) */}
             <div
               className="absolute left-1/2 bottom-2 -translate-x-1/2 origin-bottom w-8 h-2 rounded-full bg-black/60"
               style={{
@@ -533,7 +570,9 @@ export default function KnowRahWidget() {
             <button
               onClick={() => {
                 setInteracted(true);
-                try { localStorage.setItem("kr_voice_unlocked", "1"); } catch {}
+                try {
+                  localStorage.setItem("kr_voice_unlocked", "1");
+                } catch {}
               }}
               className="px-2 py-1 rounded border border-emerald-800 hover:bg-emerald-900/40"
               title="Enable voice"
@@ -544,7 +583,7 @@ export default function KnowRahWidget() {
         </div>
       </div>
 
-      <div className="rounded-2xl border border-emerald-700/40 p-3 min-h-[420px] bg-neutral-900/50">
+      <div className="rounded-2xl border border-emerald-700/40 p-3 bg-neutral-900/50 min-h-[46vh] sm:min-h-[420px]">
         <div className="space-y-2">
           {messages.map((m, i) => (
             <div key={i} className={m.role === "assistant" ? "text-emerald-200" : "text-neutral-100"}>
@@ -564,9 +603,9 @@ export default function KnowRahWidget() {
         </div>
       </div>
 
-      <div className="mt-3 flex gap-2">
+      <div className="mt-3 flex gap-2 pb-[env(safe-area-inset-bottom)]">
         <input
-          className="flex-1 rounded border border-emerald-700 bg-transparent px-3 py-2"
+          className="flex-1 rounded border border-emerald-700 bg-transparent px-3 py-2 text-[16px] sm:text-base"
           placeholder="Write to her..."
           value={input}
           onChange={(e) => {
@@ -580,7 +619,10 @@ export default function KnowRahWidget() {
             }
           }}
         />
-        <button onClick={onSend} className="rounded bg-emerald-600 px-4 py-2 hover:bg-emerald-500">
+        <button
+          onClick={onSend}
+          className="rounded bg-emerald-600 px-4 py-2 hover:bg-emerald-500 text-[16px] sm:text-base"
+        >
           Send
         </button>
       </div>

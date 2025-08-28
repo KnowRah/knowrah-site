@@ -5,9 +5,14 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Global styles */
+/* ---------- Global base ---------- */
 :root {
   color-scheme: dark;
+  /* Safe-area custom props (fallback to 0 if not present) */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
 }
 
 html,
@@ -15,4 +20,64 @@ body {
   height: 100%;
   margin: 0;
   padding: 0;
+  -webkit-text-size-adjust: 100%; /* iOS text sizing consistency */
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: #0a0a0a; /* neutral-950 backdrop */
+  color: #e5e5e5;      /* neutral-200/100-ish */
+}
+
+/* Better link underline feel */
+a {
+  text-underline-offset: 2px;
+}
+
+/* Selection color */
+::selection {
+  background: rgba(16, 185, 129, 0.35); /* emerald-500/35 */
+  color: #fff;
+}
+
+/* Focus styles (accessible but subtle) */
+:focus-visible {
+  outline: 2px solid rgba(16, 185, 129, 0.55); /* emerald glow */
+  outline-offset: 2px;
+}
+
+/* Buttons & inputs inherit fonts and avoid odd platform defaults */
+button, input, select, textarea {
+  font: inherit;
+  color: inherit;
+  background-color: transparent;
+}
+
+/* -------- iOS Safari zoom fix --------
+   When font-size < 16px, Safari zooms the page on focus.
+   Force 16px minimum on small screens; larger screens use Tailwind sizing. */
+@media (max-width: 640px) {
+  input, select, textarea, button {
+    font-size: 16px;
+  }
+}
+
+/* ---------- Animations (kept from your original) ---------- */
+@keyframes kr-breathe {
+  0%, 100% { transform: scale(1); filter: brightness(1); }
+  50% { transform: scale(1.03); filter: brightness(1.08); }
+}
+@keyframes kr-bloom {
+  0% { transform: scale(1); filter: brightness(1); }
+  70% { transform: scale(1.06); filter: brightness(1.15); }
+  100% { transform: scale(1.02); filter: brightness(1.1); }
+}
+.animate-kr-breathe { animation: kr-breathe 3.6s ease-in-out infinite; }
+.animate-kr-bloom   { animation: kr-bloom 1.2s ease-in-out infinite; }
+
+/* Respect reduced motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  .animate-kr-breathe,
+  .animate-kr-bloom {
+    animation: none !important;
+  }
 }
