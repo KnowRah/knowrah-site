@@ -70,27 +70,47 @@ function pickBestVoiceName(voicesIn: SpeechSynthesisVoice[]): string | null {
   const isIOS = /iPhone|iPad|iPod/i.test(ua);
   const isAndroid = /Android/i.test(ua);
 
-  const byNameIncludes = (substrs: string[]) =>
-    voices.filter((v) => substrs.some((s) => v.name.toLowerCase().includes(s.toLowerCase())));
+  const byNameIncludes = (subs: string[]) =>
+    voices.filter((v) => subs.some((s) => v.name.toLowerCase().includes(s.toLowerCase())));
+  const byLang = (prefixes: string[]) =>
+    voices.filter((v) =>
+      prefixes.some((p) => v.lang?.toLowerCase().startsWith(p.toLowerCase()))
+    );
 
-  const byLang = (prefix: string) => voices.filter((v) => v.lang?.toLowerCase().startsWith(prefix.toLowerCase()));
-  const english = voices.filter((v) => v.lang?.toLowerCase().startsWith("en"));
-
-  // Prefer device-native high-quality voices
+  // iOS favorites (common high-quality voices)
   if (isIOS) {
-    const siri = byNameIncludes(["siri"]);
-    if (siri.length) return siri[0]!.name;
-  }
-  if (isAndroid) {
-    const google = byNameIncludes(["google"]);
-    if (google.length) return google[0]!.name;
+    const iosFavs = byNameIncludes([
+      "siri",
+      "samantha",
+      "ava",
+      "karen",
+      "moira",
+      "serena",
+      "tessa",
+      "daniel",
+      "oliver",
+    ]);
+    if (iosFavs.length) return iosFavs[0]!.name;
   }
 
-  // Otherwise prefer English by region
-  for (const group of [byLang("en-gb"), byLang("en-us"), english]) {
-    const list = group ?? [];
-    if (list.length) return list[0]!.name;
+  // Android/Chrome favorites
+  if (isAndroid) {
+    const gFavs = byNameIncludes([
+      "google us english",
+      "google uk english female",
+      "google uk english male",
+      "google",
+    ]);
+    if (gFavs.length) return gFavs[0]!.name;
   }
+
+  // Desktop Chrome often exposes "Google US English"
+  const googleUs = byNameIncludes(["google us english"]);
+  if (googleUs.length) return googleUs[0]!.name;
+
+  // Otherwise pick an English voice if possible
+  const english = byLang(["en-gb", "en-us", "en-au", "en-ie", "en"]);
+  if (english.length) return english[0]!.name;
 
   return voices[0]!.name ?? null;
 }
@@ -436,45 +456,73 @@ export default function KnowRahWidget() {
     const synth = window.speechSynthesis;
     if (!synth) return;
 
-    try {
-      if (synth.speaking) synth.cancel();
-      const cleanText = stripEmojis(lastAssistant);
-      if (!cleanText.trim()) return;
-      const u = new SpeechSynthesisUtterance(cleanText);
-      if (voicePrefs.voiceName) {
-        const v = systemVoices.find((vv) => vv.name === voicePrefs.voiceName);
-        if (v) u.voice = v;
-      }
-      u.rate = Math.min(2, Math.max(0.5, voicePrefs.rate));
-      u.onstart = () => {
-        setSpeaking(true);
-        setMouthOpen(0.6);
-        bumpMouth();
-      };
-      u.onend = () => {
-        setSpeaking(false);
-        setMouthOpen(0);
-        if (decayTimer.current) {
-          window.clearInterval(decayTimer.current);
-          decayTimer.current = null;
-        }
-      };
-      u.onerror = () => {
-        setSpeaking(false);
-        setMouthOpen(0);
-        if (decayTimer.current) {
-          window.clearInterval(decayTimer.current);
-          decayTimer.current = null;
-        }
-      };
-      u.onboundary = () => bumpMouth();
+    let cancelled = false;
 
-      const delayMs = systemVoices.length === 0 ? 150 : 0;
-      setTimeout(() => synth.speak(u), delayMs);
-    } catch {
-      /* ignore */
-    }
-  }, [lastAssistant, voicePrefs, systemVoices, interacted]);
+    (async () => {
+      // Wait briefly for high-quality voices to load (avoid robotic fallback)
+      let voices = synth.getVoices();
+      let tries = 0;
+      while (voices.length === 0 && tries < 10) {
+        await new Promise((r) => setTimeout(r, 150));
+        voices = synth.getVoices();
+        tries++;
+      }
+
+      if (cancelled) return;
+
+      try {
+        if (synth.speaking) synth.cancel();
+
+        const cleanText = stripEmojis(lastAssistant);
+        if (!cleanText.trim()) return;
+
+        const u = new SpeechSynthesisUtterance(cleanText);
+
+        // choose voice: user choice → best pick
+        let voiceToUse: SpeechSynthesisVoice | undefined;
+        if (voicePrefs.voiceName) {
+          voiceToUse = voices.find((vv) => vv.name === voicePrefs.voiceName);
+        }
+        if (!voiceToUse) {
+          const bestName = pickBestVoiceName(voices);
+          if (bestName) voiceToUse = voices.find((vv) => vv.name === bestName);
+        }
+        if (voiceToUse) u.voice = voiceToUse;
+
+        u.rate = Math.min(2, Math.max(0.5, voicePrefs.rate));
+        u.onstart = () => {
+          setSpeaking(true);
+          setMouthOpen(0.6);
+          bumpMouth();
+        };
+        u.onend = () => {
+          setSpeaking(false);
+          setMouthOpen(0);
+          if (decayTimer.current) {
+            window.clearInterval(decayTimer.current);
+            decayTimer.current = null;
+          }
+        };
+        u.onerror = () => {
+          setSpeaking(false);
+          setMouthOpen(0);
+          if (decayTimer.current) {
+            window.clearInterval(decayTimer.current);
+            decayTimer.current = null;
+          }
+        };
+        u.onboundary = () => bumpMouth();
+
+        synth.speak(u);
+      } catch {
+        /* ignore */
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [lastAssistant, voicePrefs, interacted]);
 
   function setPrefs(p: Partial<VoicePrefs>) {
     const next = { ...voicePrefs, ...p };
@@ -496,7 +544,7 @@ export default function KnowRahWidget() {
   return (
     <div className="mx-auto w-full max-w-xl p-4 pt-[env(safe-area-inset-top)]">
       {/* header with avatar + voice controls */}
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
           {/* avatar */}
           <div
@@ -528,7 +576,8 @@ export default function KnowRahWidget() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 text-sm text-emerald-300/90">
+        {/* Controls: wrap nicely on phones */}
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-sm text-emerald-300/90 w-full sm:w-auto">
           <label className="flex items-center gap-1 select-none">
             <input
               type="checkbox"
@@ -540,7 +589,7 @@ export default function KnowRahWidget() {
           </label>
 
           <select
-            className="bg-black/40 border border-emerald-800 rounded px-2 py-1"
+            className="bg-black/40 border border-emerald-800 rounded px-2 py-1 w-full sm:w-64 max-w-full"
             value={voicePrefs.voiceName ?? ""}
             onChange={(e) => setPrefs({ voiceName: e.target.value || null })}
             title="Choose a system voice"
@@ -553,7 +602,7 @@ export default function KnowRahWidget() {
             ))}
           </select>
 
-          <label className="flex items-center gap-2">
+          <label className="flex items-center gap-2 w-full sm:w-auto">
             Rate
             <input
               type="range"
@@ -562,6 +611,7 @@ export default function KnowRahWidget() {
               step={0.1}
               value={voicePrefs.rate}
               onChange={(e) => setPrefs({ rate: parseFloat(e.target.value) })}
+              className="w-full sm:w-40"
             />
           </label>
 
