@@ -81,6 +81,10 @@ export default function KnowRahWidget() {
   const idleDelayMs = useRef<number>(90_000); // first nudge ~90s if truly idle
   const pageHiddenRef = useRef<boolean>(false);
 
+  // ★ NEW — mount gate to avoid hydration mismatches
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   function scrollToBottom() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }
@@ -343,7 +347,7 @@ export default function KnowRahWidget() {
   // collect the last assistant message for auto-speak
   const lastAssistant = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i];            // guard the lookup
+      const m = messages[i]; // guard the lookup
       if (!m) continue;
       if (m.role === "assistant") return m.text;
     }
@@ -422,7 +426,6 @@ export default function KnowRahWidget() {
       };
       // Word boundary pulses for mouth movement
       u.onboundary = () => {
-        // fires on word/char boundaries — good enough for a simple mouth
         bumpMouth();
       };
 
@@ -471,7 +474,7 @@ export default function KnowRahWidget() {
           >
             <span className="select-none">🌒</span>
 
-            {/* ★ NEW — simple SVG-ish mouth that lip-syncs (word-level) */}
+            {/* ★ NEW — simple mouth that lip-syncs (word-level) */}
             <div
               className="absolute left-1/2 bottom-2 -translate-x-1/2 origin-bottom w-8 h-2 rounded-full bg-black/60"
               style={{
@@ -525,8 +528,8 @@ export default function KnowRahWidget() {
             />
           </label>
 
-          {/* explicit unlock button for production autoplay */}
-          {voicePrefs.enabled && !interacted && (
+          {/* explicit unlock button — render only after mount to avoid hydration mismatch */}
+          {mounted && voicePrefs.enabled && !interacted && (
             <button
               onClick={() => {
                 setInteracted(true);
