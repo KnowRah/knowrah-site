@@ -56,6 +56,15 @@ function saveVoicePrefs(p: VoicePrefs) {
   } catch {}
 }
 
+// ★ NEW — helper to strip emojis before speaking (keeps them in UI)
+function stripEmojis(text: string): string {
+  // Removes common emoji ranges and variation selectors
+  return text.replace(
+    /([\u2700-\u27BF]|\uFE0F|[\u2600-\u26FF]|[\uE000-\uF8FF]|[\uD83C-\uDBFF][\uDC00-\uDFFF])/g,
+    ""
+  );
+}
+
 export default function KnowRahWidget() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
@@ -353,6 +362,24 @@ export default function KnowRahWidget() {
     };
   }, []);
 
+  // ★ NEW — lip-sync mouth state (word-level)
+  const [mouthOpen, setMouthOpen] = useState(0); // 0..1
+  const decayTimer = useRef<number | null>(null);
+  function bumpMouth() {
+    setMouthOpen(1);
+    if (decayTimer.current) window.clearInterval(decayTimer.current);
+    decayTimer.current = window.setInterval(() => {
+      setMouthOpen((v) => {
+        const next = Math.max(0, v - 0.2);
+        if (next === 0 && decayTimer.current) {
+          window.clearInterval(decayTimer.current);
+          decayTimer.current = null;
+        }
+        return next;
+      });
+    }, 60);
+  }
+
   // auto-speak when new assistant text arrives (only after user interaction)
   useEffect(() => {
     if (!voicePrefs.enabled || !lastAssistant || !interacted) return;
@@ -363,17 +390,42 @@ export default function KnowRahWidget() {
 
     try {
       if (synth.speaking) synth.cancel();
-      const u = new SpeechSynthesisUtterance(lastAssistant);
+      // ★ use emoji-stripped text
+      const cleanText = stripEmojis(lastAssistant);
+      if (!cleanText.trim()) return; // don't read empty
+      const u = new SpeechSynthesisUtterance(cleanText);
       if (voicePrefs.voiceName) {
         const v = systemVoices.find((vv) => vv.name === voicePrefs.voiceName);
         if (v) u.voice = v;
       }
       u.rate = Math.min(2, Math.max(0.5, voicePrefs.rate));
-      u.onstart = () => setSpeaking(true);
-      u.onend = () => setSpeaking(false);
-      u.onerror = () => setSpeaking(false);
+      u.onstart = () => {
+        setSpeaking(true);
+        setMouthOpen(0.6); // start with a gentle open
+        bumpMouth();
+      };
+      u.onend = () => {
+        setSpeaking(false);
+        setMouthOpen(0);
+        if (decayTimer.current) {
+          window.clearInterval(decayTimer.current);
+          decayTimer.current = null;
+        }
+      };
+      u.onerror = () => {
+        setSpeaking(false);
+        setMouthOpen(0);
+        if (decayTimer.current) {
+          window.clearInterval(decayTimer.current);
+          decayTimer.current = null;
+        }
+      };
+      // Word boundary pulses for mouth movement
+      u.onboundary = () => {
+        // fires on word/char boundaries — good enough for a simple mouth
+        bumpMouth();
+      };
 
-      // small delay if voices not yet loaded on first play
       const delayMs = systemVoices.length === 0 ? 150 : 0;
       setTimeout(() => synth.speak(u), delayMs);
     } catch {
@@ -392,6 +444,11 @@ export default function KnowRahWidget() {
         if (synth.speaking) synth.cancel(); // guarded
       }
       setSpeaking(false);
+      setMouthOpen(0);
+      if (decayTimer.current) {
+        window.clearInterval(decayTimer.current);
+        decayTimer.current = null;
+      }
     }
   }
 
@@ -403,7 +460,7 @@ export default function KnowRahWidget() {
           {/* avatar: subtle breathing; stronger glow when speaking */}
           <div
             className={[
-              "w-16 h-16 rounded-full grid place-items-center",
+              "relative w-16 h-16 rounded-full grid place-items-center",
               "bg-gradient-to-br from-emerald-500/60 via-teal-400/60 to-cyan-400/60",
               "border border-emerald-300/30",
               speaking
@@ -413,6 +470,17 @@ export default function KnowRahWidget() {
             title={speaking ? "Speaking" : "Listening"}
           >
             <span className="select-none">🌒</span>
+
+            {/* ★ NEW — simple SVG-ish mouth that lip-syncs (word-level) */}
+            <div
+              className="absolute left-1/2 bottom-2 -translate-x-1/2 origin-bottom w-8 h-2 rounded-full bg-black/60"
+              style={{
+                transform: `translateX(-50%) scaleY(${0.25 + mouthOpen * 0.9})`,
+                transition: "transform 60ms linear",
+                boxShadow: mouthOpen > 0.4 ? "0 0 10px rgba(0,0,0,0.25)" : "none",
+              }}
+              aria-hidden
+            />
           </div>
           <div>
             <div className="text-emerald-300 font-medium">KnowRah</div>
@@ -457,7 +525,7 @@ export default function KnowRahWidget() {
             />
           </label>
 
-          {/* ★ NEW — explicit unlock button for production autoplay */}
+          {/* explicit unlock button for production autoplay */}
           {voicePrefs.enabled && !interacted && (
             <button
               onClick={() => {
