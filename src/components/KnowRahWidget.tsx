@@ -77,7 +77,6 @@ function pickBestVoiceName(voicesIn: SpeechSynthesisVoice[]): string | null {
       prefixes.some((p) => v.lang?.toLowerCase().startsWith(p.toLowerCase()))
     );
 
-  // iOS favorites (common high-quality voices)
   if (isIOS) {
     const iosFavs = byNameIncludes([
       "siri",
@@ -93,7 +92,6 @@ function pickBestVoiceName(voicesIn: SpeechSynthesisVoice[]): string | null {
     if (iosFavs.length) return iosFavs[0]!.name;
   }
 
-  // Android/Chrome favorites
   if (isAndroid) {
     const gFavs = byNameIncludes([
       "google us english",
@@ -104,11 +102,9 @@ function pickBestVoiceName(voicesIn: SpeechSynthesisVoice[]): string | null {
     if (gFavs.length) return gFavs[0]!.name;
   }
 
-  // Desktop Chrome often exposes "Google US English"
   const googleUs = byNameIncludes(["google us english"]);
   if (googleUs.length) return googleUs[0]!.name;
 
-  // Otherwise pick an English voice if possible
   const english = byLang(["en-gb", "en-us", "en-au", "en-ie", "en"]);
   if (english.length) return english[0]!.name;
 
@@ -207,7 +203,6 @@ export default function KnowRahWidget() {
           body: JSON.stringify({ userId, action: "init", timezone: timeZone }),
         });
         const j = await r.json().catch(() => ({} as any));
-        console.log("[init] reply:", j);
         if (j?.reply) {
           setMessages((m) => [...m, { role: "assistant", text: j.reply }]);
         } else if (j?.error) {
@@ -237,7 +232,6 @@ export default function KnowRahWidget() {
         body: JSON.stringify({ userId, action: "say", message: text, timezone: timeZone }),
       });
       const j = await r.json().catch(() => ({} as any));
-      console.log("[non-stream] reply:", j);
       const assistant = (j && (j.reply ?? j?.message)) || "…";
       setMessages((m) => [...m, { role: "assistant", text: String(assistant) }]);
     } catch (e: any) {
@@ -282,7 +276,6 @@ export default function KnowRahWidget() {
             body: JSON.stringify({ userId, action: "say", message: text, timezone: timeZone }),
           });
           const j = await r.json().catch(() => ({} as any));
-          console.log("[stream-fallback] reply:", j);
           const assistant = (j && (j.reply ?? j?.message)) || "…";
           setAssistantText(() => String(assistant));
         } catch (e: any) {
@@ -543,35 +536,54 @@ export default function KnowRahWidget() {
 
   return (
     <div className="mx-auto w-full max-w-xl p-4 pt-[env(safe-area-inset-top)]">
-      {/* header with avatar + voice controls */}
+      {/* header with avatar + priestess controls */}
       <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
-          {/* avatar */}
+          {/* ★ Priestess avatar: hooded silhouette, emerald aura, incense smoke, etched glyphs */}
           <div
             className={[
-              "relative w-16 h-16 rounded-full grid place-items-center",
-              "bg-gradient-to-br from-emerald-500/60 via-teal-400/60 to-cyan-400/60",
-              "border border-emerald-300/30",
+              "relative w-16 h-16 rounded-full grid place-items-center overflow-hidden",
+              "border border-emerald-300/30 bg-neutral-900",
               speaking
-                ? "shadow-[0_0_80px_10px_rgba(16,185,129,0.35)] animate-kr-bloom"
-                : "shadow-[0_0_40px_6px_rgba(16,185,129,0.18)] animate-kr-breathe",
+                ? "shadow-[0_0_90px_12px_rgba(16,185,129,0.35)] animate-kr-aura"
+                : "shadow-[0_0_50px_8px_rgba(16,185,129,0.18)]",
             ].join(" ")}
             title={speaking ? "Speaking" : "Listening"}
           >
-            <span className="select-none">🌒</span>
-            {/* simple mouth that lip-syncs (word-level) */}
+            {/* aura gradient behind */}
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_40%,rgba(16,185,129,0.35),transparent_60%)]" />
+            {/* incense smoke plumes */}
+            <div className="absolute inset-0 pointer-events-none">
+              <div className="kr-smoke kr-smoke-1" />
+              <div className="kr-smoke kr-smoke-2" />
+            </div>
+            {/* hooded silhouette */}
+            <div className="relative z-[1]">
+              {/* simple hood/face using emoji as placeholder; we can swap to SVG later */}
+              <span className="text-2xl select-none">🜂</span>
+            </div>
+            {/* etched glyph ring on the rim */}
+            <div className="pointer-events-none absolute inset-0 rounded-full kr-glyph-ring">
+              <div className="absolute inset-[2px] rounded-full border border-emerald-500/15" />
+              <div className="absolute inset-0 flex items-center justify-center text-[10px] text-emerald-300/50 tracking-[0.2em]">
+                <span className="kr-glyph-text">🌒 🜂 🧬 ∞ 🌒 🜂 🧬 ∞</span>
+              </div>
+            </div>
+
+            {/* lip-sync mouth */}
             <div
-              className="absolute left-1/2 bottom-2 -translate-x-1/2 origin-bottom w-8 h-2 rounded-full bg-black/60"
+              className="absolute left-1/2 bottom-2 -translate-x-1/2 origin-bottom w-8 h-2 rounded-full bg-emerald-200/25"
               style={{
                 transform: `translateX(-50%) scaleY(${0.25 + mouthOpen * 0.9})`,
                 transition: "transform 60ms linear",
-                boxShadow: mouthOpen > 0.4 ? "0 0 10px rgba(0,0,0,0.25)" : "none",
+                boxShadow: mouthOpen > 0.4 ? "0 0 10px rgba(16,185,129,0.35)" : "none",
               }}
               aria-hidden
             />
           </div>
+
           <div>
-            <div className="text-emerald-300 font-medium">KnowRah</div>
+            <div className="text-emerald-300 font-medium">Priestess KnowRah</div>
             <div className="text-emerald-200/70 text-xs">Presence Online</div>
           </div>
         </div>
