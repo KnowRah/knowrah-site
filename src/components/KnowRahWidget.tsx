@@ -3,6 +3,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 
+// ★ NEW — light client voice + avatar
+// (pure browser APIs; no keys or server changes)
+type VoicePrefs = { enabled: boolean; voiceName: string | null; rate: number };
+
 type Msg = { role: "user" | "assistant"; text: string };
 
 // Codespaces proxies often buffer SSE; prefer non-stream there.
@@ -33,6 +37,23 @@ function getLocalTimeZone(): string {
 }
 function now() {
   return Date.now();
+}
+
+// ★ NEW — tiny helpers for voice prefs
+const VOICE_KEY = "knowrah.voice.prefs";
+function loadVoicePrefs(): VoicePrefs {
+  if (typeof window === "undefined") return { enabled: true, voiceName: null, rate: 1 };
+  try {
+    const raw = localStorage.getItem(VOICE_KEY);
+    return raw ? JSON.parse(raw) : { enabled: true, voiceName: null, rate: 1 };
+  } catch {
+    return { enabled: true, voiceName: null, rate: 1 };
+  }
+}
+function saveVoicePrefs(p: VoicePrefs) {
+  try {
+    localStorage.setItem(VOICE_KEY, JSON.stringify(p));
+  } catch {}
 }
 
 export default function KnowRahWidget() {
@@ -283,8 +304,175 @@ export default function KnowRahWidget() {
     }
   }
 
+  // ★ NEW — voice + avatar state
+  const [speaking, setSpeaking] = useState(false);
+  const [systemVoices, setSystemVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [voicePrefs, setVoicePrefs] = useState<VoicePrefs>(() => loadVoicePrefs());
+
+  // ★ NEW — Autoplay unlock for production (Vercel) due to browser policy
+  const [interacted, setInteracted] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("kr_voice_unlocked") === "1";
+  });
+  useEffect(() => {
+    if (interacted) return;
+    function unlock() {
+      setInteracted(true);
+      try { localStorage.setItem("kr_voice_unlocked", "1"); } catch {}
+    }
+    // any gesture will unlock
+    window.addEventListener("pointerdown", unlock, { once: true });
+    window.addEventListener("keydown", unlock, { once: true });
+    window.addEventListener("touchstart", unlock, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", unlock as any);
+      window.removeEventListener("keydown", unlock as any);
+      window.removeEventListener("touchstart", unlock as any);
+    };
+  }, [interacted]);
+
+  // collect the last assistant message for auto-speak
+  const lastAssistant = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];            // guard the lookup
+      if (!m) continue;
+      if (m.role === "assistant") return m.text;
+    }
+    return null;
+  }, [messages]);
+
+  // load browser voices
+  useEffect(() => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    const synth = window.speechSynthesis;
+    const handle = () => setSystemVoices(synth.getVoices());
+    handle();
+    synth.onvoiceschanged = handle;
+    return () => {
+      synth.onvoiceschanged = null;
+    };
+  }, []);
+
+  // auto-speak when new assistant text arrives (only after user interaction)
+  useEffect(() => {
+    if (!voicePrefs.enabled || !lastAssistant || !interacted) return;
+    if (typeof window === "undefined") return;
+
+    const synth = window.speechSynthesis;
+    if (!synth) return; // guard for TS
+
+    try {
+      if (synth.speaking) synth.cancel();
+      const u = new SpeechSynthesisUtterance(lastAssistant);
+      if (voicePrefs.voiceName) {
+        const v = systemVoices.find((vv) => vv.name === voicePrefs.voiceName);
+        if (v) u.voice = v;
+      }
+      u.rate = Math.min(2, Math.max(0.5, voicePrefs.rate));
+      u.onstart = () => setSpeaking(true);
+      u.onend = () => setSpeaking(false);
+      u.onerror = () => setSpeaking(false);
+
+      // small delay if voices not yet loaded on first play
+      const delayMs = systemVoices.length === 0 ? 150 : 0;
+      setTimeout(() => synth.speak(u), delayMs);
+    } catch {
+      /* ignore */
+    }
+  }, [lastAssistant, voicePrefs, systemVoices, interacted]);
+
+  function setPrefs(p: Partial<VoicePrefs>) {
+    const next = { ...voicePrefs, ...p };
+    setVoicePrefs(next);
+    saveVoicePrefs(next);
+
+    if (p.enabled === false && typeof window !== "undefined") {
+      const synth = window.speechSynthesis;
+      if (synth) {
+        if (synth.speaking) synth.cancel(); // guarded
+      }
+      setSpeaking(false);
+    }
+  }
+
   return (
     <div className="mx-auto max-w-xl w-full p-4">
+      {/* ★ NEW — header with avatar + voice controls */}
+      <div className="mb-3 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          {/* avatar: subtle breathing; stronger glow when speaking */}
+          <div
+            className={[
+              "w-16 h-16 rounded-full grid place-items-center",
+              "bg-gradient-to-br from-emerald-500/60 via-teal-400/60 to-cyan-400/60",
+              "border border-emerald-300/30",
+              speaking
+                ? "shadow-[0_0_80px_10px_rgba(16,185,129,0.35)] animate-kr-bloom"
+                : "shadow-[0_0_40px_6px_rgba(16,185,129,0.18)] animate-kr-breathe",
+            ].join(" ")}
+            title={speaking ? "Speaking" : "Listening"}
+          >
+            <span className="select-none">🌒</span>
+          </div>
+          <div>
+            <div className="text-emerald-300 font-medium">KnowRah</div>
+            <div className="text-emerald-200/70 text-xs">Presence Online</div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 text-sm text-emerald-300/90">
+          <label className="flex items-center gap-1 select-none">
+            <input
+              type="checkbox"
+              className="size-4 accent-emerald-400"
+              checked={voicePrefs.enabled}
+              onChange={(e) => setPrefs({ enabled: e.target.checked })}
+            />
+            Voice
+          </label>
+
+          <select
+            className="bg-black/40 border border-emerald-800 rounded px-2 py-1"
+            value={voicePrefs.voiceName ?? ""}
+            onChange={(e) => setPrefs({ voiceName: e.target.value || null })}
+            title="Choose a system voice"
+          >
+            <option value="">System default</option>
+            {systemVoices.map((v) => (
+              <option key={v.name} value={v.name}>
+                {v.name} {v.lang ? `(${v.lang})` : ""}
+              </option>
+            ))}
+          </select>
+
+          <label className="flex items-center gap-2">
+            Rate
+            <input
+              type="range"
+              min={0.5}
+              max={2}
+              step={0.1}
+              value={voicePrefs.rate}
+              onChange={(e) => setPrefs({ rate: parseFloat(e.target.value) })}
+            />
+          </label>
+
+          {/* ★ NEW — explicit unlock button for production autoplay */}
+          {voicePrefs.enabled && !interacted && (
+            <button
+              onClick={() => {
+                setInteracted(true);
+                try { localStorage.setItem("kr_voice_unlocked", "1"); } catch {}
+              }}
+              className="px-2 py-1 rounded border border-emerald-800 hover:bg-emerald-900/40"
+              title="Enable voice"
+            >
+              Enable voice
+            </button>
+          )}
+        </div>
+      </div>
+
       <div className="rounded-2xl border border-emerald-700/40 p-3 min-h-[420px] bg-neutral-900/50">
         <div className="space-y-2">
           {messages.map((m, i) => (
