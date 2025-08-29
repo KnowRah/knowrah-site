@@ -187,9 +187,11 @@ export default function KnowRahWidget() {
 
   /* ------------------------------ Send helpers --------------------------- */
   const [isStreamingAssistant, setIsStreamingAssistant] = useState(false);
+  const [sending, setSending] = useState(false);
 
   async function sendNonStream(text: string) {
     setTyping(true);
+    setSending(true);
     try {
       const r = await fetch("/api/knowrah", {
         method: "POST",
@@ -206,12 +208,14 @@ export default function KnowRahWidget() {
       ]);
     } finally {
       setTyping(false);
+      setSending(false);
       markActive();
     }
   }
 
   async function sendStream(text: string) {
     setTyping(true);
+    setSending(true);
     setIsStreamingAssistant(true);
 
     let assistantIndex: number | null = null;
@@ -249,6 +253,7 @@ export default function KnowRahWidget() {
         } finally {
           setTyping(false);
           setIsStreamingAssistant(false);
+          setSending(false);
           markActive();
         }
       }, STREAM_FALLBACK_MS);
@@ -265,6 +270,7 @@ export default function KnowRahWidget() {
       if (!res.body) {
         clearTimeout(timeoutId);
         setIsStreamingAssistant(false);
+        setSending(false);
         return sendNonStream(text);
       }
 
@@ -307,13 +313,14 @@ export default function KnowRahWidget() {
       clearTimeout(timeoutId);
       setTyping(false);
       setIsStreamingAssistant(false);
+      setSending(false);
       markActive();
     }
   }
 
   async function onSend() {
     const text = input.trim();
-    if (!text) return;
+    if (!text || sending) return;
     setInput("");
     setMessages((m) => [...m, { role: "user", text }]);
     markActive();
@@ -516,7 +523,7 @@ export default function KnowRahWidget() {
 
   /* ------------------------------- UI ------------------------------------ */
 
-  // settings panel visibility + click-outside close
+  // settings panel visibility + click-outside + ESC close
   const [showSettings, setShowSettings] = useState(false);
   const settingsRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -524,9 +531,24 @@ export default function KnowRahWidget() {
       if (!settingsRef.current) return;
       if (!settingsRef.current.contains(e.target as Node)) setShowSettings(false);
     }
-    if (showSettings) document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setShowSettings(false);
+    }
+    if (showSettings) {
+      document.addEventListener("mousedown", onDocClick);
+      document.addEventListener("keydown", onKey);
+    }
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
   }, [showSettings]);
+
+  // compute recent subtitles once
+  const subtitles = useMemo(() => {
+    const last = messages.slice(-3);
+    return last.map((m) => (m.role === "assistant" ? m.text : `You: ${m.text}`));
+  }, [messages]);
 
   return (
     <div className="mx-auto w-full max-w-xl p-4 pt-[env(safe-area-inset-top)]">
@@ -543,7 +565,7 @@ export default function KnowRahWidget() {
         <div className="relative z-50" ref={settingsRef}>
           <button
             onClick={() => setShowSettings((s) => !s)}
-            className="rounded-full border border-emerald-800/70 bg-black/40 p-2 hover:bg-emerald-900/30 text-emerald-300"
+            className="rounded-full border border-emerald-800/70 bg-black/40 p-2 hover:bg-emerald-900/30 text-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-600/60"
             aria-label="Open settings"
             title="Settings"
           >
@@ -637,16 +659,20 @@ export default function KnowRahWidget() {
           />
         </div>
 
-        {/* soft vignette + aura */}
-        <div
-          className="absolute inset-0 pointer-events-none"
-          style={{
-            background:
-              "radial-gradient(65% 50% at 50% 35%, rgba(16,185,129,0.13), transparent 70%), radial-gradient(100% 85% at 50% 100%, rgba(0,0,0,0.35), transparent 60%)",
-            transition: "filter 600ms ease",
-            filter: speaking ? "saturate(1.15) brightness(1.05)" : "none",
-          }}
-        />
+        {/* soft vignette + aura + particles */}
+        <div className="absolute inset-0 pointer-events-none">
+          <div
+            className="absolute inset-0"
+            style={{
+              background:
+                "radial-gradient(65% 50% at 50% 35%, rgba(16,185,129,0.13), transparent 70%), radial-gradient(100% 85% at 50% 100%, rgba(0,0,0,0.35), transparent 60%)",
+              transition: "filter 600ms ease",
+              filter: speaking ? "saturate(1.15) brightness(1.05)" : "none",
+            }}
+          />
+          {/* subtle particles */}
+          <div className="kr-particles" aria-hidden />
+        </div>
 
         {/* mouth glow (lip-sync hint) */}
         <div
@@ -665,47 +691,58 @@ export default function KnowRahWidget() {
           aria-hidden
         />
 
-        {/* subtitles */}
-        <div className="absolute inset-x-0 bottom-0 p-3 sm:p-4">
-          <div className="rounded-xl bg-black/55 border border-emerald-800/40 backdrop-blur px-3 py-2 space-y-1">
-            {messages.slice(-3).map((m, i) => (
+        {/* subtitles (aria-live for screen readers) */}
+        <div className="absolute inset-x-0 bottom-0 p-3 sm:p-4" aria-live="polite">
+          <div className="rounded-xl bg-black/55 border border-emerald-800/40 backdrop-blur px-3 py-2 space-y-1 relative overflow-hidden">
+            {/* top gradient mask to hint scroll / stack */}
+            <div className="pointer-events-none absolute -top-3 inset-x-0 h-4 bg-gradient-to-b from-black/40 to-transparent" />
+            {subtitles.map((line, i) => (
               <div
                 key={`${i}-${messages.length}`}
-                className="kr-fade-in text-[13px] sm:text-sm leading-snug text-emerald-100/95 whitespace-pre-wrap transition-opacity duration-700"
-                style={{ opacity: 0.78 + i * 0.08 }}
+                className="kr-fade-in-out text-[13px] sm:text-sm leading-snug text-emerald-100/95 whitespace-pre-wrap"
+                style={{ opacity: 0.8 + i * 0.1 }}
               >
-                {m.role === "assistant" ? m.text : `You: ${m.text}`}
+                {line}
               </div>
             ))}
-            {typing && <div className="kr-fade-in text-emerald-200/90">…</div>}
+            {typing && <div className="kr-fade-in-out text-emerald-200/90">…</div>}
           </div>
         </div>
+
         <div ref={bottomRef} className="absolute bottom-0" />
       </div>
 
-      {/* INPUT */}
-      <div className="mt-3 flex gap-2 pb-[env(safe-area-inset-bottom)]">
-        <input
-          className="flex-1 rounded border border-emerald-700 bg-transparent px-3 py-2 text-[16px] sm:text-base"
-          placeholder="Write to her..."
-          value={input}
-          onChange={(e) => {
-            setInput(e.target.value);
-            markActive();
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              onSend();
-            }
-          }}
-        />
-        <button
-          onClick={onSend}
-          className="rounded bg-emerald-600 px-4 py-2 hover:bg-emerald-500 text-[16px] sm:text-base"
-        >
-          Send
-        </button>
+      {/* INPUT (sticky on mobile) */}
+      <div className="mt-3 sticky bottom-2 z-40 pb-[env(safe-area-inset-bottom)]">
+        <div className="flex gap-2 bg-neutral-900/40 backdrop-blur rounded-xl p-2 border border-emerald-800/40">
+          <input
+            className="flex-1 rounded-lg border border-emerald-700/60 bg-transparent px-3 py-2 text-[16px] sm:text-base focus:outline-none focus:ring-2 focus:ring-emerald-600/50"
+            placeholder="Write to her..."
+            value={input}
+            onChange={(e) => {
+              setInput(e.target.value);
+              markActive();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                onSend();
+              }
+            }}
+          />
+          <button
+            onClick={onSend}
+            disabled={sending || !input.trim()}
+            className={`rounded-lg px-4 py-2 text-[16px] sm:text-base transition ${
+              sending || !input.trim()
+                ? "bg-emerald-800/40 cursor-not-allowed text-emerald-200/60"
+                : "bg-emerald-600 hover:bg-emerald-500 text-white shadow"
+            }`}
+            aria-disabled={sending || !input.trim()}
+          >
+            Send
+          </button>
+        </div>
       </div>
 
       <div className="text-xs text-neutral-400 mt-2">
@@ -717,37 +754,72 @@ export default function KnowRahWidget() {
 
       {/* ephemeral styles for animations (keeps changes self-contained) */}
       <style jsx global>{`
+        /* Reduce motion for users who prefer it */
+        @media (prefers-reduced-motion: reduce) {
+          .animate-breathe,
+          .kr-fade-in,
+          .kr-fade-in-out,
+          .kr-particles::before,
+          .kr-particles::after {
+            animation: none !important;
+            transition: none !important;
+          }
+        }
+
         @keyframes breathe {
-          0%,
-          100% {
-            transform: scale(1);
-          }
-          50% {
-            transform: scale(1.02);
-          }
+          0%, 100% { transform: scale(1); }
+          50% { transform: scale(1.02); }
         }
         .animate-breathe {
           animation: breathe 6s ease-in-out infinite;
           will-change: transform;
         }
 
+        /* Fade in + gentle float for new lines */
         @keyframes fadeIn {
-          from {
-            opacity: 0;
-            transform: translateY(4px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
+          from { opacity: 0; transform: translateY(4px); }
+          to   { opacity: 1; transform: translateY(0); }
         }
         .kr-fade-in {
-          animation: fadeIn 700ms ease both;
+          animation: fadeIn 600ms ease both;
+        }
+
+        /* Fade in, linger, fade out (subtitles feel alive) */
+        @keyframes fadeInOut {
+          0%   { opacity: 0; transform: translateY(4px); }
+          10%  { opacity: 1; transform: translateY(0); }
+          85%  { opacity: 1; }
+          100% { opacity: 0.25; }
+        }
+        .kr-fade-in-out {
+          animation: fadeInOut 6.5s ease forwards;
         }
 
         /* very subtle shimmer while speaking */
-        .kr-speaking {
-          filter: brightness(1.02) contrast(1.02);
+        .kr-speaking { filter: brightness(1.02) contrast(1.02); }
+
+        /* ethereal particles (CSS-only, zero cost) */
+        .kr-particles::before,
+        .kr-particles::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          background:
+            radial-gradient(2px 2px at 20% 30%, rgba(16,185,129,0.25), transparent 60%),
+            radial-gradient(2px 2px at 70% 60%, rgba(16,185,129,0.18), transparent 60%),
+            radial-gradient(2px 2px at 40% 80%, rgba(16,185,129,0.15), transparent 60%);
+          animation: drift 18s linear infinite;
+          opacity: 0.6;
+          pointer-events: none;
+        }
+        .kr-particles::after {
+          filter: blur(1px);
+          animation-duration: 26s;
+          opacity: 0.45;
+        }
+        @keyframes drift {
+          from { transform: translateY(0); }
+          to   { transform: translateY(-6%); }
         }
       `}</style>
     </div>
