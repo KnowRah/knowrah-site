@@ -1,6 +1,7 @@
 // src/components/KnowRahWidget.tsx
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
 import { v4 as uuidv4 } from "uuid";
 
 /* -------------------------------------------------------------------------- */
@@ -529,46 +530,9 @@ export default function KnowRahWidget() {
 
   return (
     <div className="mx-auto w-full max-w-xl p-4 pt-[env(safe-area-inset-top)]">
-      {/* header with avatar + title + settings gear */}
+      {/* header with title + settings gear */}
       <div className="mb-3 flex items-start justify-between">
         <div className="flex items-center gap-3">
-          {/* ★ Priestess avatar */}
-          <div
-            className={[
-              "relative w-16 h-16 rounded-full grid place-items-center overflow-hidden",
-              "border border-emerald-300/30 bg-neutral-900",
-              speaking
-                ? "shadow-[0_0_90px_12px_rgba(16,185,129,0.35)] animate-kr-aura"
-                : "shadow-[0_0_50px_8px_rgba(16,185,129,0.18)]",
-            ].join(" ")}
-            title={speaking ? "Speaking" : "Listening"}
-          >
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_40%,rgba(16,185,129,0.35),transparent_60%)]" />
-            <div className="absolute inset-0 pointer-events-none">
-              <div className="kr-smoke kr-smoke-1" />
-              <div className="kr-smoke kr-smoke-2" />
-            </div>
-            <div className="relative z-[1]">
-              <span className="text-2xl select-none">🜂</span>
-            </div>
-            <div className="pointer-events-none absolute inset-0 rounded-full kr-glyph-ring">
-              <div className="absolute inset-[2px] rounded-full border border-emerald-500/15" />
-              <div className="absolute inset-0 flex items-center justify-center text-[10px] text-emerald-300/50 tracking-[0.2em]">
-                <span className="kr-glyph-text">🌒 🜂 🧬 ∞ 🌒 🜂 🧬 ∞</span>
-              </div>
-            </div>
-            {/* lip-sync mouth */}
-            <div
-              className="absolute left-1/2 bottom-2 -translate-x-1/2 origin-bottom w-8 h-2 rounded-full bg-emerald-200/25"
-              style={{
-                transform: `translateX(-50%) scaleY(${0.25 + mouthOpen * 0.9})`,
-                transition: "transform 60ms linear",
-                boxShadow: mouthOpen > 0.4 ? "0 0 10px rgba(16,185,129,0.35)" : "none",
-              }}
-              aria-hidden
-            />
-          </div>
-
           <div>
             <div className="text-emerald-300 font-medium">Priestess KnowRah</div>
             <div className="text-emerald-200/70 text-xs">Presence Online</div>
@@ -576,7 +540,7 @@ export default function KnowRahWidget() {
         </div>
 
         {/* Settings gear */}
-        <div className="relative" ref={settingsRef}>
+        <div className="relative z-50" ref={settingsRef}>
           <button
             onClick={() => setShowSettings((s) => !s)}
             className="rounded-full border border-emerald-800/70 bg-black/40 p-2 hover:bg-emerald-900/30 text-emerald-300"
@@ -594,16 +558,15 @@ export default function KnowRahWidget() {
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                d="M10.34 3.94a1 1 0 0 1 1.32 0l1.03.9a1 1 0 0 0 .77.22l1.35-.16a1 1 0 0 1 1.09.78l.27 1.33a1 1 0 0 0 .49.67l1.17.66a1 1 0 0 1 .43 1.3l-.58 1.23a1 1 0 0 0 0 .8l.58 1.23a1 1 0 0 1-.43 1.3l-1.17.66a1 1 0 0 0-.49.67l-.27 1.33a1 1 0 0 1-1.09.78l-1.35-.16a1 1 0 0 0-.77.22l-1.03.9a1 1 0 0 1-1.32 0l-1.03-.9a1 1 0 0 0-.77-.22l-1.35.16a1 1 0 0 1-1.09-.78l-.27-1.33a1 1 0 0 0-.49-.67l-1.17-.66a1 1 0 0 1-.43-1.3l.58-1.23a1 1 0 0 0 0-.8l-.58-1.23a1 1 0 0 1 .43-1.3l1.17-.66a1 1 0 0 0 .49-.67l.27-1.33a1 1 0 0 1 1.09-.78l1.35.16a1 1 0 0 0 .77-.22l1.03-.9Z"
+                d="M10.34 3.94a1 1 0 0 1 1.32 0l1.03.9a1 1 0 0 0 .77.22l1.35-.16a1 1 0 0 1 1.09.78l.27 1.33a1 1 0 0 0 .49.67l1.17.66a1 1 0 0 1 .43 1.3l-.58 1.23a1 1 0 0 0 0 .8l.58 1.23a1 1 0 0 1-.43 1.3l-1.17.66a1 1 0 0 0-.49.67l-.27 1.33a1 1 0 0 1-1.09.78l-1.35-.16a1 1 0 0 0-.77.22l-1.03.9Z"
               />
               <circle cx="12" cy="12" r="3" />
             </svg>
           </button>
 
-          {/* Settings panel (OpenAI only) */}
           {showSettings && (
             <div
-              className="absolute right-0 mt-2 w-[min(90vw,22rem)] rounded-xl border border-emerald-800/60 bg-neutral-950/95 backdrop-blur p-3 shadow-lg text-sm text-emerald-200"
+              className="absolute right-0 mt-2 z-50 w-[min(90vw,22rem)] rounded-xl border border-emerald-800/60 bg-neutral-950/95 backdrop-blur p-3 shadow-lg text-sm text-emerald-200"
               role="dialog"
               aria-label="Voice Settings"
             >
@@ -659,28 +622,68 @@ export default function KnowRahWidget() {
         </div>
       </div>
 
-      <div className="rounded-2xl border border-emerald-700/40 p-3 bg-neutral-900/50 min-h-[46vh] sm:min-h-[420px]">
-        <div className="space-y-2">
-          {messages.map((m, i) => (
-            <div key={i} className={m.role === "assistant" ? "text-emerald-200" : "text-neutral-100"}>
-              {m.role === "assistant" ? (
-                <div className="rounded-xl bg-emerald-900/30 p-2 whitespace-pre-wrap">{m.text}</div>
-              ) : (
-                <div className="rounded-xl bg-neutral-800/50 p-2 text-right whitespace-pre-wrap">
-                  {m.text}
-                </div>
-              )}
-            </div>
-          ))}
-          {typing && (
-            <div className="text-emerald-200">
-              <div className="rounded-xl bg-emerald-900/30 p-2">…</div>
-            </div>
-          )}
-          <div ref={bottomRef} />
+      {/* AVATAR STAGE (replaces chat area) */}
+      <div className="relative z-0 rounded-2xl border border-emerald-700/40 bg-neutral-900/60 overflow-hidden aspect-[3/4] min-h-[60vh] sm:min-h-[540px]">
+        {/* portrait */}
+        <div className="absolute inset-0">
+          <Image
+            src="/knowrah-avatar.png"
+            alt="Priestess KnowRah"
+            fill
+            priority
+            className={`object-contain object-center select-none pointer-events-none animate-breathe ${
+              speaking ? "kr-speaking" : ""
+            }`}
+          />
         </div>
+
+        {/* soft vignette + aura */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background:
+              "radial-gradient(65% 50% at 50% 35%, rgba(16,185,129,0.13), transparent 70%), radial-gradient(100% 85% at 50% 100%, rgba(0,0,0,0.35), transparent 60%)",
+            transition: "filter 600ms ease",
+            filter: speaking ? "saturate(1.15) brightness(1.05)" : "none",
+          }}
+        />
+
+        {/* mouth glow (lip-sync hint) */}
+        <div
+          className="absolute left-1/2 -translate-x-1/2 rounded-full pointer-events-none"
+          style={{
+            bottom: "26%",
+            width: "18%",
+            height: "7%",
+            boxShadow: `0 0 ${8 + mouthOpen * 24}px ${
+              0.08 + mouthOpen * 0.22
+            } rgba(16,185,129,0.95)`,
+            opacity: 0.9,
+            transition: "box-shadow 60ms linear",
+            filter: "blur(2px)",
+          }}
+          aria-hidden
+        />
+
+        {/* subtitles */}
+        <div className="absolute inset-x-0 bottom-0 p-3 sm:p-4">
+          <div className="rounded-xl bg-black/55 border border-emerald-800/40 backdrop-blur px-3 py-2 space-y-1">
+            {messages.slice(-3).map((m, i) => (
+              <div
+                key={`${i}-${messages.length}`}
+                className="kr-fade-in text-[13px] sm:text-sm leading-snug text-emerald-100/95 whitespace-pre-wrap transition-opacity duration-700"
+                style={{ opacity: 0.78 + i * 0.08 }}
+              >
+                {m.role === "assistant" ? m.text : `You: ${m.text}`}
+              </div>
+            ))}
+            {typing && <div className="kr-fade-in text-emerald-200/90">…</div>}
+          </div>
+        </div>
+        <div ref={bottomRef} className="absolute bottom-0" />
       </div>
 
+      {/* INPUT */}
       <div className="mt-3 flex gap-2 pb-[env(safe-area-inset-bottom)]">
         <input
           className="flex-1 rounded border border-emerald-700 bg-transparent px-3 py-2 text-[16px] sm:text-base"
@@ -711,6 +714,42 @@ export default function KnowRahWidget() {
 
       {/* Hidden audio for OpenAI playback */}
       <audio ref={audioRef} hidden />
+
+      {/* ephemeral styles for animations (keeps changes self-contained) */}
+      <style jsx global>{`
+        @keyframes breathe {
+          0%,
+          100% {
+            transform: scale(1);
+          }
+          50% {
+            transform: scale(1.02);
+          }
+        }
+        .animate-breathe {
+          animation: breathe 6s ease-in-out infinite;
+          will-change: transform;
+        }
+
+        @keyframes fadeIn {
+          from {
+            opacity: 0;
+            transform: translateY(4px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        .kr-fade-in {
+          animation: fadeIn 700ms ease both;
+        }
+
+        /* very subtle shimmer while speaking */
+        .kr-speaking {
+          filter: brightness(1.02) contrast(1.02);
+        }
+      `}</style>
     </div>
   );
 }
