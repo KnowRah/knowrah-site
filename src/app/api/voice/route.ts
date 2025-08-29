@@ -19,7 +19,17 @@ const MIME = {
 } as const;
 type Format = keyof typeof MIME;
 
-/** Light sanitizer: remove emojis (helps some TTS engines sound cleaner) */
+/** Voices known to work well with gpt-4o-mini-tts */
+const SUPPORTED_VOICES = new Set([
+  "verse", // bedtime default
+  "alloy",
+  "amber",
+  "opal",
+  "coral",
+  "sage",
+]);
+
+/** Light sanitizer: remove emojis (some TTS engines sound cleaner) */
 function stripEmojis(s: string) {
   return s.replace(
     /([\u2700-\u27BF]|\uFE0F|[\u2600-\u26FF]|[\uE000-\uF8FF]|[\uD83C-\uDBFF][\uDC00-\uDFFF])/g,
@@ -44,7 +54,8 @@ export async function POST(req: Request) {
 
     const body = await req.json().catch(() => ({}));
     const textRaw = (body?.text ?? "").toString();
-    const voice = (body?.voice ?? "alloy").toString(); // change later if you like
+    const requested = (body?.voice ?? "verse").toString().toLowerCase();
+    const voice = SUPPORTED_VOICES.has(requested) ? requested : "verse"; // graceful fallback
     const formatInput = (body?.format ?? "mp3").toString().toLowerCase();
 
     if (!textRaw.trim()) return bad("Missing text");
@@ -58,7 +69,7 @@ export async function POST(req: Request) {
     const text = (body?.stripEmojis === false ? textRaw : stripEmojis(textRaw)).trim();
     if (text.length > 4000) return bad("Text too long (max ~4000 chars)");
 
-    // Call OpenAI TTS
+    // Call OpenAI TTS (streaming response passthrough)
     const resp = await fetch("https://api.openai.com/v1/audio/speech", {
       method: "POST",
       headers: {
@@ -67,21 +78,28 @@ export async function POST(req: Request) {
       },
       body: JSON.stringify({
         model: TTS_MODEL, // e.g., "gpt-4o-mini-tts"
-        voice,            // e.g., "alloy" (we’ll expose choices in UI)
+        voice,            // "verse" (default) or another supported voice
         input: text,
-        format,           // "mp3" | "wav" | ...
+        format,           // "mp3" | "wav" | "ogg" | "aac" | "flac"
       }),
     });
 
     if (!resp.ok) {
-      const errText = await resp.text().catch(() => "");
-      return bad(errText || `OpenAI TTS error ${resp.status}`, 502);
+      // Surface a meaningful message back to the client
+      let errMsg = `OpenAI TTS error ${resp.status}`;
+      try {
+        const j = await resp.json();
+        errMsg = j?.error?.message || JSON.stringify(j);
+      } catch {
+        const t = await resp.text().catch(() => "");
+        if (t) errMsg = t;
+      }
+      return bad(errMsg, 502);
     }
 
     const stream = resp.body;
     if (!stream) return bad("Upstream returned no audio body", 502);
 
-    // Stream audio bytes back to the client
     return new Response(stream, {
       status: 200,
       headers: {

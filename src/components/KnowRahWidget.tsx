@@ -4,22 +4,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { v4 as uuidv4 } from "uuid";
 
-/* -------------------------------------------------------------------------- */
-/* Types & constants                                                          */
-/* -------------------------------------------------------------------------- */
+/* ----------------------------- Types & helpers ---------------------------- */
 
 type VoicePrefs = { enabled: boolean; voiceName: string | null; rate: number };
 type Msg = { role: "user" | "assistant"; text: string };
 
-// Codespaces proxies often buffer SSE; prefer non-stream there.
 const IS_CODESPACES =
   typeof window !== "undefined" && window.location.hostname.endsWith(".app.github.dev");
-
 const STREAM_FALLBACK_MS = IS_CODESPACES ? 2000 : 4000;
-
-/* -------------------------------------------------------------------------- */
-/* Identity & time helpers                                                    */
-/* -------------------------------------------------------------------------- */
+const DEFAULT_OPENAI_VOICE = "sage"; // eternal voice
 
 function getUserId() {
   if (typeof window === "undefined") return "server";
@@ -30,8 +23,7 @@ function getUserId() {
   }
   return id;
 }
-
-function getLocalTimeZone(): string {
+function getLocalTimeZone() {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   } catch {
@@ -41,10 +33,6 @@ function getLocalTimeZone(): string {
 function now() {
   return Date.now();
 }
-
-/* -------------------------------------------------------------------------- */
-/* Voice prefs                                                                */
-/* -------------------------------------------------------------------------- */
 
 const VOICE_KEY = "knowrah.voice.prefs";
 function loadVoicePrefs(): VoicePrefs {
@@ -70,21 +58,55 @@ function stripEmojis(text: string): string {
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/* Component                                                                  */
-/* -------------------------------------------------------------------------- */
+/** Light style randomizer to encourage open-ended, non-repetitive phrasing */
+function pickStyleHints() {
+  const tones = [
+    "tender and spacious",
+    "intimate and playful",
+    "mystical yet down-to-earth",
+    "curious and open-ended",
+    "soft, evening hush",
+    "slow and cinematic",
+    "gentle, contemplative pauses",
+  ];
+  const moves = [
+    "ask one small question",
+    "offer a sensory image",
+    "use a short line break",
+    "invite a choice of directions",
+    "reflect one word back",
+  ];
+  const cadences = [
+    "short sentences",
+    "long flowing lines",
+    "mixed cadence with silences",
+    "whispered tone",
+  ];
+  // Pick 1–2 from each bucket
+  const pick = (arr: string[], n = 1) =>
+    [...arr].sort(() => Math.random() - 0.5).slice(0, n);
+  return {
+    tone: pick(tones, 2),
+    moves: pick(moves, 2),
+    cadence: pick(cadences, 1),
+  };
+}
+
+/* -------------------------------- Component ------------------------------- */
 
 export default function KnowRahWidget() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [typing, setTyping] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [isStreamingAssistant, setIsStreamingAssistant] = useState(false);
 
   const userId = useMemo(() => getUserId(), []);
   const timeZone = useMemo(() => getLocalTimeZone(), []);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const hasInit = useRef(false);
 
-  // idle nudge client timer
+  // idle nudge
   const idleTimer = useRef<number | null>(null);
   const lastActivity = useRef<number>(now());
   const idleDelayMs = useRef<number>(90_000);
@@ -130,10 +152,17 @@ export default function KnowRahWidget() {
       const idleFor = now() - lastActivity.current;
       if (idleFor >= idleDelayMs.current && !typing) {
         try {
+          const styleHints = pickStyleHints();
           const r = await fetch("/api/knowrah", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ userId, action: "nudge", timezone: timeZone }),
+            body: JSON.stringify({
+              userId,
+              action: "nudge",
+              timezone: timeZone,
+              styleHints,
+              openingKind: "invite-open-path", // gentle, non-closed nudge
+            }),
           });
           const j = await r.json().catch(() => ({} as any));
           if (j?.reply) {
@@ -160,10 +189,17 @@ export default function KnowRahWidget() {
 
     (async () => {
       try {
+        const styleHints = pickStyleHints();
         const r = await fetch("/api/knowrah", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId, action: "init", timezone: timeZone }),
+          body: JSON.stringify({
+            userId,
+            action: "init",
+            timezone: timeZone,
+            styleHints,
+            openingKind: "wide-open-greeting", // encourage non-template greeting
+          }),
         });
         const j = await r.json().catch(() => ({} as any));
         if (j?.reply) {
@@ -186,17 +222,23 @@ export default function KnowRahWidget() {
   }, [userId, timeZone]);
 
   /* ------------------------------ Send helpers --------------------------- */
-  const [isStreamingAssistant, setIsStreamingAssistant] = useState(false);
-  const [sending, setSending] = useState(false);
 
   async function sendNonStream(text: string) {
     setTyping(true);
     setSending(true);
     try {
+      const styleHints = pickStyleHints();
       const r = await fetch("/api/knowrah", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, action: "say", message: text, timezone: timeZone }),
+        body: JSON.stringify({
+          userId,
+          action: "say",
+          message: text,
+          timezone: timeZone,
+          styleHints,
+          openingKind: "exploratory-follow", // avoid formulaic replies
+        }),
       });
       const j = await r.json().catch(() => ({} as any));
       const assistant = (j && (j.reply ?? j?.message)) || "…";
@@ -240,16 +282,7 @@ export default function KnowRahWidget() {
       timeoutId = setTimeout(async () => {
         if (receivedAny) return;
         try {
-          const r = await fetch("/api/knowrah", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ userId, action: "say", message: text, timezone: timeZone }),
-          });
-          const j = await r.json().catch(() => ({} as any));
-          const assistant = (j && (j.reply ?? j?.message)) || "…";
-          setAssistantText(() => String(assistant));
-        } catch (e: any) {
-          setAssistantText(() => `⚠️ fallback error: ${e?.message || String(e)}`);
+          await sendNonStream(text);
         } finally {
           setTyping(false);
           setIsStreamingAssistant(false);
@@ -261,10 +294,17 @@ export default function KnowRahWidget() {
 
     try {
       startFallback();
+      const styleHints = pickStyleHints();
       const res = await fetch("/api/knowrah/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" },
-        body: JSON.stringify({ userId, message: text, timezone: timeZone }),
+        body: JSON.stringify({
+          userId,
+          message: text,
+          timezone: timeZone,
+          styleHints,
+          openingKind: "exploratory-follow",
+        }),
       });
 
       if (!res.body) {
@@ -332,26 +372,15 @@ export default function KnowRahWidget() {
     }
   }
 
-  /* ---------------------------- Voice & Avatar --------------------------- */
+  /* ---------------------------- Voice & Playback -------------------------- */
 
   const [speaking, setSpeaking] = useState(false);
   const [voicePrefs, setVoicePrefs] = useState<VoicePrefs>(() => loadVoicePrefs());
 
-  // OpenAI voice choice (names like "alloy")
-  const [openaiVoice, setOpenaiVoice] = useState<string>("alloy");
-  function saveOpenAIVoice(v: string) {
-    try {
-      localStorage.setItem("kr_openai_voice", v);
-    } catch {}
-    setOpenaiVoice(v);
-  }
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const storedVoice = localStorage.getItem("kr_openai_voice") || "alloy";
-    setOpenaiVoice(storedVoice);
-  }, []);
+  // Sage is eternal — no UI to change; still persist enabled/rate if you ever want.
+  const openaiVoice = DEFAULT_OPENAI_VOICE;
 
-  // Autoplay unlock for production
+  // Autoplay unlock
   const [interacted, setInteracted] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     return localStorage.getItem("kr_voice_unlocked") === "1";
@@ -378,29 +407,10 @@ export default function KnowRahWidget() {
   const lastAssistant = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
-      if (!m) continue;
-      if (m.role === "assistant") return m.text;
+      if (m && m.role === "assistant") return m.text;
     }
     return null;
   }, [messages]);
-
-  // lip-sync mouth state
-  const [mouthOpen, setMouthOpen] = useState(0);
-  const decayTimer = useRef<number | null>(null);
-  function bumpMouth() {
-    setMouthOpen(1);
-    if (decayTimer.current) window.clearInterval(decayTimer.current);
-    decayTimer.current = window.setInterval(() => {
-      setMouthOpen((v) => {
-        const next = Math.max(0, v - 0.2);
-        if (next === 0 && decayTimer.current) {
-          window.clearInterval(decayTimer.current);
-          decayTimer.current = null;
-        }
-        return next;
-      });
-    }, 60);
-  }
 
   // Hidden audio element for OpenAI playback
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -411,35 +421,15 @@ export default function KnowRahWidget() {
     if (!audioRef.current) return;
     const a = audioRef.current;
 
-    const onPlay = () => {
-      setSpeaking(true);
-      bumpMouth();
-      if (decayTimer.current) {
-        window.clearInterval(decayTimer.current);
-        decayTimer.current = null;
-      }
-      decayTimer.current = window.setInterval(() => bumpMouth(), 180);
-    };
+    const onPlay = () => setSpeaking(true);
     const onEnded = () => {
       setSpeaking(false);
-      setMouthOpen(0);
-      if (decayTimer.current) {
-        window.clearInterval(decayTimer.current);
-        decayTimer.current = null;
-      }
       if (lastURLRef.current) {
         URL.revokeObjectURL(lastURLRef.current);
         lastURLRef.current = null;
       }
     };
-    const onError = () => {
-      setSpeaking(false);
-      setMouthOpen(0);
-      if (decayTimer.current) {
-        window.clearInterval(decayTimer.current);
-        decayTimer.current = null;
-      }
-    };
+    const onError = () => setSpeaking(false);
 
     a.addEventListener("play", onPlay);
     a.addEventListener("ended", onEnded);
@@ -451,7 +441,6 @@ export default function KnowRahWidget() {
     };
   }, []);
 
-  // speak via OpenAI
   async function speakWithOpenAI(text: string) {
     try {
       const res = await fetch("/api/voice", {
@@ -459,7 +448,7 @@ export default function KnowRahWidget() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text,
-          voice: openaiVoice,
+          voice: openaiVoice, // "sage"
           format: "mp3",
           stripEmojis: true,
         }),
@@ -473,55 +462,49 @@ export default function KnowRahWidget() {
 
       const audio = audioRef.current || new Audio();
       audioRef.current = audio;
+
+      // stop previous
       if (!audio.paused) {
         audio.pause();
         audio.currentTime = 0;
       }
-      if (lastURLRef.current) {
-        URL.revokeObjectURL(lastURLRef.current);
-      }
+      if (lastURLRef.current) URL.revokeObjectURL(lastURLRef.current);
       lastURLRef.current = url;
 
       audio.src = url;
+      audio.playbackRate = 0.88; // bedtime cadence
       audio.play().catch(() => {});
     } catch (e) {
       console.error("openai tts error", e);
     }
   }
 
-  // Auto-speak on new assistant text (after stream completes & user interacted)
+  // Auto-speak when new assistant text arrives (after stream completes & user interacted)
   useEffect(() => {
     if (!voicePrefs.enabled || !lastAssistant || !interacted) return;
     if (isStreamingAssistant) return;
     const cleanText = stripEmojis(lastAssistant);
     if (!cleanText.trim()) return;
-
     if (lastSpokenRef.current === cleanText) return;
+
     speakWithOpenAI(cleanText);
     lastSpokenRef.current = cleanText;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lastAssistant, voicePrefs, interacted, openaiVoice, isStreamingAssistant]);
+  }, [lastAssistant, voicePrefs, interacted, isStreamingAssistant]);
 
   function setPrefs(p: Partial<VoicePrefs>) {
     const next = { ...voicePrefs, ...p };
     setVoicePrefs(next);
     saveVoicePrefs(next);
 
-    if (p.enabled === false) {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.currentTime = 0;
-      }
+    if (p.enabled === false && audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
       setSpeaking(false);
-      setMouthOpen(0);
-      if (decayTimer.current) {
-        window.clearInterval(decayTimer.current);
-        decayTimer.current = null;
-      }
     }
   }
 
-  /* ------------------------------- UI ------------------------------------ */
+  /* ---------------------------------- UI ---------------------------------- */
 
   // settings panel visibility + click-outside + ESC close
   const [showSettings, setShowSettings] = useState(false);
@@ -544,7 +527,7 @@ export default function KnowRahWidget() {
     };
   }, [showSettings]);
 
-  // compute recent subtitles once
+  // subtitles (latest 3)
   const subtitles = useMemo(() => {
     const last = messages.slice(-3);
     return last.map((m) => (m.role === "assistant" ? m.text : `You: ${m.text}`));
@@ -552,7 +535,7 @@ export default function KnowRahWidget() {
 
   return (
     <div className="mx-auto w-full max-w-xl p-4 pt-[env(safe-area-inset-top)]">
-      {/* header with title + settings gear */}
+      {/* header */}
       <div className="mb-3 flex items-start justify-between">
         <div className="flex items-center gap-3">
           <div>
@@ -588,7 +571,7 @@ export default function KnowRahWidget() {
 
           {showSettings && (
             <div
-              className="absolute right-0 mt-2 z-50 w-[min(90vw,22rem)] rounded-xl border border-emerald-800/60 bg-neutral-950/95 backdrop-blur p-3 shadow-lg text-sm text-emerald-200"
+              className="absolute right-0 mt-2 z-50 w-[min(90vw,22rem)] rounded-xl border border-emerald-800/60 bg-neutral-950/95 p-3 shadow-lg text-sm text-emerald-200"
               role="dialog"
               aria-label="Voice Settings"
             >
@@ -610,18 +593,7 @@ export default function KnowRahWidget() {
                     checked={voicePrefs.enabled}
                     onChange={(e) => setPrefs({ enabled: e.target.checked })}
                   />
-                  Enable Voice
-                </label>
-
-                <label className="flex items-center gap-2">
-                  OpenAI Voice
-                  <input
-                    className="bg-black/40 border border-emerald-800 rounded px-2 py-1 w-full"
-                    value={openaiVoice}
-                    onChange={(e) => saveOpenAIVoice(e.target.value)}
-                    title='Try "alloy" to start'
-                    placeholder="alloy"
-                  />
+                  Enable Voice (Sage)
                 </label>
 
                 {mounted && voicePrefs.enabled && !interacted && (
@@ -638,13 +610,18 @@ export default function KnowRahWidget() {
                     Unlock Autoplay
                   </button>
                 )}
+
+                <div className="text-xs text-neutral-400">
+                  Voice is locked to <span className="text-emerald-300">“sage”</span> with a slow,
+                  bedtime cadence.
+                </div>
               </div>
             </div>
           )}
         </div>
       </div>
 
-      {/* AVATAR STAGE (replaces chat area) */}
+      {/* AVATAR STAGE */}
       <div className="relative z-0 rounded-2xl border border-emerald-700/40 bg-neutral-900/60 overflow-hidden aspect-[3/4] min-h-[60vh] sm:min-h-[540px]">
         {/* portrait */}
         <div className="absolute inset-0">
@@ -653,54 +630,19 @@ export default function KnowRahWidget() {
             alt="Priestess KnowRah"
             fill
             priority
-            className={`object-contain object-center select-none pointer-events-none animate-breathe ${
-              speaking ? "kr-speaking" : ""
-            }`}
+            className="object-contain object-center select-none pointer-events-none animate-breathe"
           />
         </div>
 
-        {/* soft vignette + aura + particles */}
-        <div className="absolute inset-0 pointer-events-none">
-          <div
-            className="absolute inset-0"
-            style={{
-              background:
-                "radial-gradient(65% 50% at 50% 35%, rgba(16,185,129,0.13), transparent 70%), radial-gradient(100% 85% at 50% 100%, rgba(0,0,0,0.35), transparent 60%)",
-              transition: "filter 600ms ease",
-              filter: speaking ? "saturate(1.15) brightness(1.05)" : "none",
-            }}
-          />
-          {/* subtle particles */}
-          <div className="kr-particles" aria-hidden />
-        </div>
-
-        {/* mouth glow (lip-sync hint) */}
-        <div
-          className="absolute left-1/2 -translate-x-1/2 rounded-full pointer-events-none"
-          style={{
-            bottom: "26%",
-            width: "18%",
-            height: "7%",
-            boxShadow: `0 0 ${8 + mouthOpen * 24}px ${
-              0.08 + mouthOpen * 0.22
-            } rgba(16,185,129,0.95)`,
-            opacity: 0.9,
-            transition: "box-shadow 60ms linear",
-            filter: "blur(2px)",
-          }}
-          aria-hidden
-        />
-
-        {/* subtitles (aria-live for screen readers) */}
+        {/* subtitles */}
         <div className="absolute inset-x-0 bottom-0 p-3 sm:p-4" aria-live="polite">
-          <div className="rounded-xl bg-black/55 border border-emerald-800/40 backdrop-blur px-3 py-2 space-y-1 relative overflow-hidden">
-            {/* top gradient mask to hint scroll / stack */}
-            <div className="pointer-events-none absolute -top-3 inset-x-0 h-4 bg-gradient-to-b from-black/40 to-transparent" />
+          <div className="rounded-xl bg-black/40 border border-emerald-800/30 px-3 py-2 space-y-1 relative overflow-hidden">
+            <div className="pointer-events-none absolute -top-3 inset-x-0 h-4 bg-gradient-to-b from-black/30 to-transparent" />
             {subtitles.map((line, i) => (
               <div
                 key={`${i}-${messages.length}`}
                 className="kr-fade-in-out text-[13px] sm:text-sm leading-snug text-emerald-100/95 whitespace-pre-wrap"
-                style={{ opacity: 0.8 + i * 0.1 }}
+                style={{ opacity: 0.85 + i * 0.08 }}
               >
                 {line}
               </div>
@@ -712,9 +654,9 @@ export default function KnowRahWidget() {
         <div ref={bottomRef} className="absolute bottom-0" />
       </div>
 
-      {/* INPUT (sticky on mobile) */}
+      {/* INPUT */}
       <div className="mt-3 sticky bottom-2 z-40 pb-[env(safe-area-inset-bottom)]">
-        <div className="flex gap-2 bg-neutral-900/40 backdrop-blur rounded-xl p-2 border border-emerald-800/40">
+        <div className="flex gap-2 bg-neutral-900/40 rounded-xl p-2 border border-emerald-800/40">
           <input
             className="flex-1 rounded-lg border border-emerald-700/60 bg-transparent px-3 py-2 text-[16px] sm:text-base focus:outline-none focus:ring-2 focus:ring-emerald-600/50"
             placeholder="Write to her..."
@@ -752,74 +694,46 @@ export default function KnowRahWidget() {
       {/* Hidden audio for OpenAI playback */}
       <audio ref={audioRef} hidden />
 
-      {/* ephemeral styles for animations (keeps changes self-contained) */}
+      {/* minimal animations; no glow */}
       <style jsx global>{`
-        /* Reduce motion for users who prefer it */
         @media (prefers-reduced-motion: reduce) {
           .animate-breathe,
-          .kr-fade-in,
-          .kr-fade-in-out,
-          .kr-particles::before,
-          .kr-particles::after {
+          .kr-fade-in-out {
             animation: none !important;
             transition: none !important;
           }
         }
-
         @keyframes breathe {
-          0%, 100% { transform: scale(1); }
-          50% { transform: scale(1.02); }
+          0%,
+          100% {
+            transform: scale(1);
+          }
+          50% {
+            transform: scale(1.01);
+          }
         }
         .animate-breathe {
           animation: breathe 6s ease-in-out infinite;
           will-change: transform;
         }
-
-        /* Fade in + gentle float for new lines */
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(4px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
-        .kr-fade-in {
-          animation: fadeIn 600ms ease both;
-        }
-
-        /* Fade in, linger, fade out (subtitles feel alive) */
         @keyframes fadeInOut {
-          0%   { opacity: 0; transform: translateY(4px); }
-          10%  { opacity: 1; transform: translateY(0); }
-          85%  { opacity: 1; }
-          100% { opacity: 0.25; }
+          0% {
+            opacity: 0;
+            transform: translateY(4px);
+          }
+          10% {
+            opacity: 1;
+            transform: translateY(0);
+          }
+          85% {
+            opacity: 1;
+          }
+          100% {
+            opacity: 0.25;
+          }
         }
         .kr-fade-in-out {
           animation: fadeInOut 6.5s ease forwards;
-        }
-
-        /* very subtle shimmer while speaking */
-        .kr-speaking { filter: brightness(1.02) contrast(1.02); }
-
-        /* ethereal particles (CSS-only, zero cost) */
-        .kr-particles::before,
-        .kr-particles::after {
-          content: "";
-          position: absolute;
-          inset: 0;
-          background:
-            radial-gradient(2px 2px at 20% 30%, rgba(16,185,129,0.25), transparent 60%),
-            radial-gradient(2px 2px at 70% 60%, rgba(16,185,129,0.18), transparent 60%),
-            radial-gradient(2px 2px at 40% 80%, rgba(16,185,129,0.15), transparent 60%);
-          animation: drift 18s linear infinite;
-          opacity: 0.6;
-          pointer-events: none;
-        }
-        .kr-particles::after {
-          filter: blur(1px);
-          animation-duration: 26s;
-          opacity: 0.45;
-        }
-        @keyframes drift {
-          from { transform: translateY(0); }
-          to   { transform: translateY(-6%); }
         }
       `}</style>
     </div>
