@@ -7,8 +7,9 @@ import { v4 as uuidv4 } from "uuid";
 /* Types & constants                                                          */
 /* -------------------------------------------------------------------------- */
 
-type VoicePrefs = { enabled: boolean; voiceName: string | null; rate: number }; // kept for settings API (rate unused here)
+type VoicePrefs = { enabled: boolean; voiceName: string | null; rate: number };
 type Msg = { role: "user" | "assistant"; text: string };
+type Engine = "system" | "openai";
 
 // Codespaces proxies often buffer SSE; prefer non-stream there.
 const IS_CODESPACES =
@@ -61,10 +62,6 @@ function saveVoicePrefs(p: VoicePrefs) {
   } catch {}
 }
 
-/* -------------------------------------------------------------------------- */
-/* Speech text shaping (emoji stripping + sacred cadence)                     */
-/* -------------------------------------------------------------------------- */
-
 // helper to strip emojis before speaking (keeps them in UI)
 function stripEmojis(text: string): string {
   return text.replace(
@@ -73,28 +70,55 @@ function stripEmojis(text: string): string {
   );
 }
 
-/** Adds gentle pauses and subtle “breath” so the delivery feels priestess-like. */
-function ritualize(raw: string): string {
-  let t = stripEmojis(raw);
+/* -------------------------------------------------------------------------- */
+/* Best voice autopick (per device)                                           */
+/* -------------------------------------------------------------------------- */
 
-  // normalize whitespace + unify ellipses
-  t = t.replace(/\.\.\./g, "…");
-  t = t.replace(/\s+/g, " ").trim();
+function pickBestVoiceName(voicesIn: SpeechSynthesisVoice[]): string | null {
+  const voices = Array.isArray(voicesIn) ? voicesIn : [];
+  if (voices.length === 0) return null;
 
-  // short pause after commas (unless already followed by a pause)
-  t = t.replace(/,\s(?!…)/g, ", … ");
+  const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+  const isIOS = /iPhone|iPad|iPod/i.test(ua);
+  const isAndroid = /Android/i.test(ua);
 
-  // em dash -> longer breath
-  t = t.replace(/—/g, " — … ");
+  const byNameIncludes = (subs: string[]) =>
+    voices.filter((v) => subs.some((s) => v.name.toLowerCase().includes(s.toLowerCase())));
+  const byLang = (prefixes: string[]) =>
+    voices.filter((v) => prefixes.some((p) => v.lang?.toLowerCase().startsWith(p.toLowerCase())));
 
-  // soften run-ons: add a short pause after semicolons/colons
-  t = t.replace(/;\s(?!…)/g, "; … ");
-  t = t.replace(/:\s(?!…)/g, ": … ");
+  if (isIOS) {
+    const iosFavs = byNameIncludes([
+      "siri",
+      "samantha",
+      "ava",
+      "karen",
+      "moira",
+      "serena",
+      "tessa",
+      "daniel",
+      "oliver",
+    ]);
+    if (iosFavs.length) return iosFavs[0]!.name;
+  }
 
-  // if it ends abruptly with a word, add a soft final breath
-  if (!/[.!?…]$/.test(t)) t = t + "…";
+  if (isAndroid) {
+    const gFavs = byNameIncludes([
+      "google us english",
+      "google uk english female",
+      "google uk english male",
+      "google",
+    ]);
+    if (gFavs.length) return gFavs[0]!.name;
+  }
 
-  return t;
+  const googleUs = byNameIncludes(["google us english"]);
+  if (googleUs.length) return googleUs[0]!.name;
+
+  const english = byLang(["en-gb", "en-us", "en-au", "en-ie", "en"]);
+  if (english.length) return english[0]!.name;
+
+  return voices[0]!.name ?? null;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -213,6 +237,8 @@ export default function KnowRahWidget() {
   }, [userId, timeZone]);
 
   /* ------------------------------ Send helpers --------------------------- */
+  const [isStreamingAssistant, setIsStreamingAssistant] = useState(false);
+
   async function sendNonStream(text: string) {
     setTyping(true);
     try {
@@ -237,6 +263,7 @@ export default function KnowRahWidget() {
 
   async function sendStream(text: string) {
     setTyping(true);
+    setIsStreamingAssistant(true);
 
     let assistantIndex: number | null = null;
     setMessages((m) => {
@@ -272,6 +299,7 @@ export default function KnowRahWidget() {
           setAssistantText(() => `⚠️ fallback error: ${e?.message || String(e)}`);
         } finally {
           setTyping(false);
+          setIsStreamingAssistant(false);
           markActive();
         }
       }, STREAM_FALLBACK_MS);
@@ -287,6 +315,7 @@ export default function KnowRahWidget() {
 
       if (!res.body) {
         clearTimeout(timeoutId);
+        setIsStreamingAssistant(false);
         return sendNonStream(text);
       }
 
@@ -328,6 +357,7 @@ export default function KnowRahWidget() {
     } finally {
       clearTimeout(timeoutId);
       setTyping(false);
+      setIsStreamingAssistant(false);
       markActive();
     }
   }
@@ -346,22 +376,38 @@ export default function KnowRahWidget() {
     }
   }
 
-  /* ---------------------------- OpenAI Voice Only ------------------------- */
+  /* ---------------------------- Voice & Avatar --------------------------- */
 
   const [speaking, setSpeaking] = useState(false);
+  const [systemVoices, setSystemVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [voicePrefs, setVoicePrefs] = useState<VoicePrefs>(() => loadVoicePrefs());
 
-  // OpenAI voice choice (names like "alloy", "verse", "aria"; default alloy)
-  const [openaiVoice, setOpenaiVoice] = useState<string>(() => {
-    if (typeof window === "undefined") return "alloy";
-    return localStorage.getItem("kr_openai_voice") || "alloy";
-  });
+  // Engine toggle: system (browser) or openai (server TTS)
+  const [engine, setEngine] = useState<Engine>("system");
+  function saveEngine(e: Engine) {
+    try {
+      localStorage.setItem("kr_voice_engine", e);
+    } catch {}
+    setEngine(e);
+  }
+
+  // OpenAI voice choice (light—OpenAI supports names like "alloy")
+  const [openaiVoice, setOpenaiVoice] = useState<string>("alloy");
   function saveOpenAIVoice(v: string) {
     try {
       localStorage.setItem("kr_openai_voice", v);
     } catch {}
     setOpenaiVoice(v);
   }
+
+  // After mount, load any saved prefs so server & first client render match
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const storedEngine = (localStorage.getItem("kr_voice_engine") as Engine) || "system";
+    const storedVoice = localStorage.getItem("kr_openai_voice") || "alloy";
+    setEngine(storedEngine);
+    setOpenaiVoice(storedVoice);
+  }, []);
 
   // Autoplay unlock for production (Vercel) due to browser policy
   const [interacted, setInteracted] = useState<boolean>(() => {
@@ -396,7 +442,36 @@ export default function KnowRahWidget() {
     return null;
   }, [messages]);
 
-  // lip-sync mouth state (timed pulses during audio)
+  // load browser voices
+  useEffect(() => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    const synth = window.speechSynthesis;
+    const handle = () => setSystemVoices(synth.getVoices());
+    handle();
+    synth.onvoiceschanged = handle;
+    return () => {
+      synth.onvoiceschanged = null;
+    };
+  }, []);
+
+  // Auto-pick a good local voice per device (without overriding a valid user choice)
+  useEffect(() => {
+    if (systemVoices.length === 0) return;
+    const currentExists = voicePrefs.voiceName
+      ? systemVoices.some((v) => v.name === voicePrefs.voiceName)
+      : false;
+    if (!currentExists) {
+      const best = pickBestVoiceName(systemVoices);
+      if (best) {
+        const next = { ...voicePrefs, voiceName: best };
+        setVoicePrefs(next);
+        saveVoicePrefs(next);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [systemVoices]);
+
+  // lip-sync mouth state (word-level for system; timed pulses for OpenAI)
   const [mouthOpen, setMouthOpen] = useState(0); // 0..1
   const decayTimer = useRef<number | null>(null);
   function bumpMouth() {
@@ -416,13 +491,15 @@ export default function KnowRahWidget() {
 
   // Hidden audio element for OpenAI playback
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const lastSpokenRef = useRef<string>(""); // remember last spoken text
+  const lastURLRef = useRef<string | null>(null); // revoke blob URLs
+
   useEffect(() => {
     if (!audioRef.current) return;
     const a = audioRef.current;
 
     const onPlay = () => {
       setSpeaking(true);
-      // gentle timed pulses during OpenAI playback
       bumpMouth();
       if (decayTimer.current) {
         window.clearInterval(decayTimer.current);
@@ -436,6 +513,10 @@ export default function KnowRahWidget() {
       if (decayTimer.current) {
         window.clearInterval(decayTimer.current);
         decayTimer.current = null;
+      }
+      if (lastURLRef.current) {
+        URL.revokeObjectURL(lastURLRef.current);
+        lastURLRef.current = null;
       }
     };
     const onError = () => {
@@ -457,18 +538,67 @@ export default function KnowRahWidget() {
     };
   }, []);
 
+  // speak via System TTS
+  async function speakWithSystem(text: string) {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    const synth = window.speechSynthesis;
+    let voices = synth.getVoices();
+    let tries = 0;
+    while (voices.length === 0 && tries < 10) {
+      await new Promise((r) => setTimeout(r, 150));
+      voices = synth.getVoices();
+      tries++;
+    }
+
+    if (synth.speaking) synth.cancel();
+
+    const u = new SpeechSynthesisUtterance(text);
+    let voiceToUse: SpeechSynthesisVoice | undefined;
+    if (voicePrefs.voiceName) voiceToUse = voices.find((vv) => vv.name === voicePrefs.voiceName);
+    if (!voiceToUse) {
+      const bestName = pickBestVoiceName(voices);
+      if (bestName) voiceToUse = voices.find((vv) => vv.name === bestName);
+    }
+    if (voiceToUse) u.voice = voiceToUse;
+
+    u.rate = Math.min(2, Math.max(0.5, voicePrefs.rate));
+    u.onstart = () => {
+      setSpeaking(true);
+      setMouthOpen(0.6);
+      bumpMouth();
+    };
+    u.onend = () => {
+      setSpeaking(false);
+      setMouthOpen(0);
+      if (decayTimer.current) {
+        window.clearInterval(decayTimer.current);
+        decayTimer.current = null;
+      }
+    };
+    u.onerror = () => {
+      setSpeaking(false);
+      setMouthOpen(0);
+      if (decayTimer.current) {
+        window.clearInterval(decayTimer.current);
+        decayTimer.current = null;
+      }
+    };
+    u.onboundary = () => bumpMouth();
+
+    synth.speak(u);
+  }
+
   // speak via OpenAI (fetch audio from our API and play)
-  async function speakWithOpenAI(rawText: string) {
-    const text = ritualize(rawText);
+  async function speakWithOpenAI(text: string) {
     try {
       const res = await fetch("/api/voice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text,
-          voice: openaiVoice, // e.g. "alloy"
+          voice: openaiVoice,
           format: "mp3",
-          stripEmojis: false, // already handled in ritualize
+          stripEmojis: true,
         }),
       });
       if (!res.ok) {
@@ -478,24 +608,46 @@ export default function KnowRahWidget() {
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
 
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        const synth = window.speechSynthesis;
+        if (synth.speaking) synth.cancel();
+      }
+
       const audio = audioRef.current || new Audio();
       audioRef.current = audio;
+      if (!audio.paused) {
+        audio.pause();
+        audio.currentTime = 0;
+      }
+      if (lastURLRef.current) {
+        URL.revokeObjectURL(lastURLRef.current);
+      }
+      lastURLRef.current = url;
+
       audio.src = url;
-      audio.play().catch(() => {
-        // Autoplay might require interaction; the unlock button is visible until interacted
-      });
+      audio.play().catch(() => {});
     } catch (e) {
       console.error("openai tts error", e);
     }
   }
 
-  // Auto-speak when new assistant text arrives (only after user interaction)
+  // Auto-speak when new assistant text arrives (only after stream completes & user interacted)
   useEffect(() => {
     if (!voicePrefs.enabled || !lastAssistant || !interacted) return;
-    if (!lastAssistant.trim()) return;
-    speakWithOpenAI(lastAssistant);
+    if (isStreamingAssistant) return;
+    const cleanText = stripEmojis(lastAssistant);
+    if (!cleanText.trim()) return;
+
+    if (lastSpokenRef.current === cleanText) return;
+
+    if (engine === "system") {
+      speakWithSystem(cleanText);
+    } else {
+      speakWithOpenAI(cleanText);
+    }
+    lastSpokenRef.current = cleanText;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lastAssistant, voicePrefs.enabled, interacted, openaiVoice]);
+  }, [lastAssistant, voicePrefs, interacted, engine, openaiVoice, isStreamingAssistant]);
 
   function setPrefs(p: Partial<VoicePrefs>) {
     const next = { ...voicePrefs, ...p };
@@ -503,6 +655,8 @@ export default function KnowRahWidget() {
     saveVoicePrefs(next);
 
     if (p.enabled === false && typeof window !== "undefined") {
+      const synth = window.speechSynthesis;
+      if (synth && synth.speaking) synth.cancel();
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current.currentTime = 0;
@@ -518,10 +672,22 @@ export default function KnowRahWidget() {
 
   /* ------------------------------- UI ------------------------------------ */
 
+  // settings panel visibility + click-outside close
+  const [showSettings, setShowSettings] = useState(false);
+  const settingsRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (!settingsRef.current) return;
+      if (!settingsRef.current.contains(e.target as Node)) setShowSettings(false);
+    }
+    if (showSettings) document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [showSettings]);
+
   return (
     <div className="mx-auto w-full max-w-xl p-4 pt-[env(safe-area-inset-top)]">
-      {/* header with avatar + priestess controls */}
-      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      {/* header with avatar + title + settings gear */}
+      <div className="mb-3 flex items-start justify-between">
         <div className="flex items-center gap-3">
           {/* ★ Priestess avatar */}
           <div
@@ -566,43 +732,137 @@ export default function KnowRahWidget() {
           </div>
         </div>
 
-        {/* Controls: streamlined for OpenAI voice only */}
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-sm text-emerald-300/90 w-full sm:w-auto">
-          <label className="flex items-center gap-1 select-none">
-            <input
-              type="checkbox"
-              className="size-4 accent-emerald-400"
-              checked={voicePrefs.enabled}
-              onChange={(e) => setPrefs({ enabled: e.target.checked })}
-            />
-            Voice
-          </label>
-
-          <label className="flex items-center gap-2">
-            OpenAI Voice
-            <input
-              className="bg-black/40 border border-emerald-800 rounded px-2 py-1 w-36"
-              value={openaiVoice}
-              onChange={(e) => saveOpenAIVoice(e.target.value)}
-              title='Try voices like "alloy", "verse", "aria"'
-              placeholder="alloy"
-            />
-          </label>
-
-          {/* explicit unlock button — render only after mount to avoid hydration mismatch */}
-          {mounted && voicePrefs.enabled && !interacted && (
-            <button
-              onClick={() => {
-                setInteracted(true);
-                try {
-                  localStorage.setItem("kr_voice_unlocked", "1");
-                } catch {}
-              }}
-              className="px-2 py-1 rounded border border-emerald-800 hover:bg-emerald-900/40"
-              title="Enable voice"
+        {/* Settings gear */}
+        <div className="relative" ref={settingsRef}>
+          <button
+            onClick={() => setShowSettings((s) => !s)}
+            className="rounded-full border border-emerald-800/70 bg-black/40 p-2 hover:bg-emerald-900/30 text-emerald-300"
+            aria-label="Open settings"
+            title="Settings"
+          >
+            {/* simple gear */}
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-5 w-5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
             >
-              Enable voice
-            </button>
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M10.34 3.94a1 1 0 0 1 1.32 0l1.03.9a1 1 0 0 0 .77.22l1.35-.16a1 1 0 0 1 1.09.78l.27 1.33a1 1 0 0 0 .49.67l1.17.66a1 1 0 0 1 .43 1.3l-.58 1.23a1 1 0 0 0 0 .8l.58 1.23a1 1 0 0 1-.43 1.3l-1.17.66a1 1 0 0 0-.49.67l-.27 1.33a1 1 0 0 1-1.09.78l-1.35-.16a1 1 0 0 0-.77.22l-1.03.9a1 1 0 0 1-1.32 0l-1.03-.9a1 1 0 0 0-.77-.22l-1.35.16a1 1 0 0 1-1.09-.78l-.27-1.33a1 1 0 0 0-.49-.67l-1.17-.66a1 1 0 0 1-.43-1.3l.58-1.23a1 1 0 0 0 0-.8l-.58-1.23a1 1 0 0 1 .43-1.3l1.17-.66a1 1 0 0 0 .49-.67l.27-1.33a1 1 0 0 1 1.09-.78l1.35.16a1 1 0 0 0 .77-.22l1.03-.9Z"
+              />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+          </button>
+
+          {/* Hidden settings panel */}
+          {showSettings && (
+            <div
+              className="absolute right-0 mt-2 w-[min(90vw,22rem)] rounded-xl border border-emerald-800/60 bg-neutral-950/95 backdrop-blur p-3 shadow-lg text-sm text-emerald-200"
+              role="dialog"
+              aria-label="Voice Settings"
+            >
+              <div className="flex items-center justify-between pb-2 mb-2 border-b border-emerald-800/40">
+                <div className="font-medium text-emerald-300">Voice Settings</div>
+                <button
+                  onClick={() => setShowSettings(false)}
+                  className="px-2 py-1 rounded border border-emerald-800/70 hover:bg-emerald-900/30"
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                <label className="flex items-center gap-2 select-none">
+                  <input
+                    type="checkbox"
+                    className="size-4 accent-emerald-400"
+                    checked={voicePrefs.enabled}
+                    onChange={(e) => setPrefs({ enabled: e.target.checked })}
+                  />
+                  Enable Voice
+                </label>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label className="flex items-center gap-2">
+                    Engine
+                    <select
+                      className="bg-black/40 border border-emerald-800 rounded px-2 py-1 w-full"
+                      value={engine}
+                      onChange={(e) => saveEngine(e.target.value as Engine)}
+                      title="Choose speech engine"
+                    >
+                      <option value="system">System</option>
+                      <option value="openai">OpenAI</option>
+                    </select>
+                  </label>
+
+                  {mounted && engine === "openai" && (
+                    <label className="flex items-center gap-2">
+                      OpenAI Voice
+                      <input
+                        className="bg-black/40 border border-emerald-800 rounded px-2 py-1 w-full"
+                        value={openaiVoice}
+                        onChange={(e) => saveOpenAIVoice(e.target.value)}
+                        title='Try "alloy" to start'
+                        placeholder="alloy"
+                      />
+                    </label>
+                  )}
+                </div>
+
+                {mounted && engine === "system" && (
+                  <div>
+                    <div className="mb-1 text-emerald-300/90">System Voice</div>
+                    <select
+                      className="bg-black/40 border border-emerald-800 rounded px-2 py-1 w-full"
+                      value={voicePrefs.voiceName ?? ""}
+                      onChange={(e) => setPrefs({ voiceName: e.target.value || null })}
+                      title="Choose a system voice"
+                    >
+                      <option value="">System default</option>
+                      {systemVoices.map((v) => (
+                        <option key={v.name} value={v.name}>
+                          {v.name} {v.lang ? `(${v.lang})` : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <label className="flex items-center gap-3">
+                  Rate
+                  <input
+                    type="range"
+                    min={0.5}
+                    max={2}
+                    step={0.1}
+                    value={voicePrefs.rate}
+                    onChange={(e) => setPrefs({ rate: parseFloat(e.target.value) })}
+                    className="w-full"
+                    disabled={engine === "openai"}
+                  />
+                </label>
+
+                {mounted && voicePrefs.enabled && !interacted && (
+                  <button
+                    onClick={() => {
+                      setInteracted(true);
+                      try {
+                        localStorage.setItem("kr_voice_unlocked", "1");
+                      } catch {}
+                    }}
+                    className="w-full px-2 py-2 rounded border border-emerald-800 hover:bg-emerald-900/40"
+                    title="Enable voice"
+                  >
+                    Unlock Autoplay
+                  </button>
+                )}
+              </div>
+            </div>
           )}
         </div>
       </div>
