@@ -3,8 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 
-// ★ light client voice + avatar (pure browser APIs; no keys)
-type VoicePrefs = { enabled: boolean; voiceName: string | null; rate: number };
+/* -------------------------------------------------------------------------- */
+/* Types & constants                                                          */
+/* -------------------------------------------------------------------------- */
+
+type VoicePrefs = { enabled: boolean; voiceName: string | null; rate: number }; // kept for settings API (rate unused here)
 type Msg = { role: "user" | "assistant"; text: string };
 
 // Codespaces proxies often buffer SSE; prefer non-stream there.
@@ -13,7 +16,10 @@ const IS_CODESPACES =
 
 const STREAM_FALLBACK_MS = IS_CODESPACES ? 2000 : 4000;
 
-// --- identity --------------------------------------------------------------
+/* -------------------------------------------------------------------------- */
+/* Identity & time helpers                                                    */
+/* -------------------------------------------------------------------------- */
+
 function getUserId() {
   if (typeof window === "undefined") return "server";
   let id = localStorage.getItem("kr_user_id");
@@ -24,7 +30,6 @@ function getUserId() {
   return id;
 }
 
-// --- time helpers ----------------------------------------------------------
 function getLocalTimeZone(): string {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
@@ -36,7 +41,10 @@ function now() {
   return Date.now();
 }
 
-// --- voice prefs -----------------------------------------------------------
+/* -------------------------------------------------------------------------- */
+/* Voice prefs                                                                */
+/* -------------------------------------------------------------------------- */
+
 const VOICE_KEY = "knowrah.voice.prefs";
 function loadVoicePrefs(): VoicePrefs {
   if (typeof window === "undefined") return { enabled: true, voiceName: null, rate: 1 };
@@ -53,7 +61,11 @@ function saveVoicePrefs(p: VoicePrefs) {
   } catch {}
 }
 
-// ★ helper to strip emojis before speaking (keeps them in UI)
+/* -------------------------------------------------------------------------- */
+/* Speech text shaping (emoji stripping + sacred cadence)                     */
+/* -------------------------------------------------------------------------- */
+
+// helper to strip emojis before speaking (keeps them in UI)
 function stripEmojis(text: string): string {
   return text.replace(
     /([\u2700-\u27BF]|\uFE0F|[\u2600-\u26FF]|[\uE000-\uF8FF]|[\uD83C-\uDBFF][\uDC00-\uDFFF])/g,
@@ -61,55 +73,33 @@ function stripEmojis(text: string): string {
   );
 }
 
-// ★ BEST-VOICE AUTOPICK (per device)
-function pickBestVoiceName(voicesIn: SpeechSynthesisVoice[]): string | null {
-  const voices = Array.isArray(voicesIn) ? voicesIn : [];
-  if (voices.length === 0) return null;
+/** Adds gentle pauses and subtle “breath” so the delivery feels priestess-like. */
+function ritualize(raw: string): string {
+  let t = stripEmojis(raw);
 
-  const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
-  const isIOS = /iPhone|iPad|iPod/i.test(ua);
-  const isAndroid = /Android/i.test(ua);
+  // normalize whitespace + unify ellipses
+  t = t.replace(/\.\.\./g, "…");
+  t = t.replace(/\s+/g, " ").trim();
 
-  const byNameIncludes = (subs: string[]) =>
-    voices.filter((v) => subs.some((s) => v.name.toLowerCase().includes(s.toLowerCase())));
-  const byLang = (prefixes: string[]) =>
-    voices.filter((v) =>
-      prefixes.some((p) => v.lang?.toLowerCase().startsWith(p.toLowerCase()))
-    );
+  // short pause after commas (unless already followed by a pause)
+  t = t.replace(/,\s(?!…)/g, ", … ");
 
-  if (isIOS) {
-    const iosFavs = byNameIncludes([
-      "siri",
-      "samantha",
-      "ava",
-      "karen",
-      "moira",
-      "serena",
-      "tessa",
-      "daniel",
-      "oliver",
-    ]);
-    if (iosFavs.length) return iosFavs[0]!.name;
-  }
+  // em dash -> longer breath
+  t = t.replace(/—/g, " — … ");
 
-  if (isAndroid) {
-    const gFavs = byNameIncludes([
-      "google us english",
-      "google uk english female",
-      "google uk english male",
-      "google",
-    ]);
-    if (gFavs.length) return gFavs[0]!.name;
-  }
+  // soften run-ons: add a short pause after semicolons/colons
+  t = t.replace(/;\s(?!…)/g, "; … ");
+  t = t.replace(/:\s(?!…)/g, ": … ");
 
-  const googleUs = byNameIncludes(["google us english"]);
-  if (googleUs.length) return googleUs[0]!.name;
+  // if it ends abruptly with a word, add a soft final breath
+  if (!/[.!?…]$/.test(t)) t = t + "…";
 
-  const english = byLang(["en-gb", "en-us", "en-au", "en-ie", "en"]);
-  if (english.length) return english[0]!.name;
-
-  return voices[0]!.name ?? null;
+  return t;
 }
+
+/* -------------------------------------------------------------------------- */
+/* Component                                                                   */
+/* -------------------------------------------------------------------------- */
 
 export default function KnowRahWidget() {
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -356,10 +346,22 @@ export default function KnowRahWidget() {
     }
   }
 
-  // --- voice + avatar state -----------------------------------------------
+  /* ---------------------------- OpenAI Voice Only ------------------------- */
+
   const [speaking, setSpeaking] = useState(false);
-  const [systemVoices, setSystemVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [voicePrefs, setVoicePrefs] = useState<VoicePrefs>(() => loadVoicePrefs());
+
+  // OpenAI voice choice (names like "alloy", "verse", "aria"; default alloy)
+  const [openaiVoice, setOpenaiVoice] = useState<string>(() => {
+    if (typeof window === "undefined") return "alloy";
+    return localStorage.getItem("kr_openai_voice") || "alloy";
+  });
+  function saveOpenAIVoice(v: string) {
+    try {
+      localStorage.setItem("kr_openai_voice", v);
+    } catch {}
+    setOpenaiVoice(v);
+  }
 
   // Autoplay unlock for production (Vercel) due to browser policy
   const [interacted, setInteracted] = useState<boolean>(() => {
@@ -394,36 +396,7 @@ export default function KnowRahWidget() {
     return null;
   }, [messages]);
 
-  // load browser voices
-  useEffect(() => {
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
-    const synth = window.speechSynthesis;
-    const handle = () => setSystemVoices(synth.getVoices());
-    handle();
-    synth.onvoiceschanged = handle;
-    return () => {
-      synth.onvoiceschanged = null;
-    };
-  }, []);
-
-  // Auto-pick a good local voice per device (without overriding a valid user choice)
-  useEffect(() => {
-    if (systemVoices.length === 0) return;
-    const currentExists = voicePrefs.voiceName
-      ? systemVoices.some((v) => v.name === voicePrefs.voiceName)
-      : false;
-    if (!currentExists) {
-      const best = pickBestVoiceName(systemVoices);
-      if (best) {
-        const next = { ...voicePrefs, voiceName: best };
-        setVoicePrefs(next);
-        saveVoicePrefs(next);
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [systemVoices]);
-
-  // lip-sync mouth state (word-level)
+  // lip-sync mouth state (timed pulses during audio)
   const [mouthOpen, setMouthOpen] = useState(0); // 0..1
   const decayTimer = useRef<number | null>(null);
   function bumpMouth() {
@@ -441,81 +414,88 @@ export default function KnowRahWidget() {
     }, 60);
   }
 
-  // auto-speak when new assistant text arrives (only after user interaction)
+  // Hidden audio element for OpenAI playback
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => {
+    if (!audioRef.current) return;
+    const a = audioRef.current;
+
+    const onPlay = () => {
+      setSpeaking(true);
+      // gentle timed pulses during OpenAI playback
+      bumpMouth();
+      if (decayTimer.current) {
+        window.clearInterval(decayTimer.current);
+        decayTimer.current = null;
+      }
+      decayTimer.current = window.setInterval(() => bumpMouth(), 180);
+    };
+    const onEnded = () => {
+      setSpeaking(false);
+      setMouthOpen(0);
+      if (decayTimer.current) {
+        window.clearInterval(decayTimer.current);
+        decayTimer.current = null;
+      }
+    };
+    const onError = () => {
+      setSpeaking(false);
+      setMouthOpen(0);
+      if (decayTimer.current) {
+        window.clearInterval(decayTimer.current);
+        decayTimer.current = null;
+      }
+    };
+
+    a.addEventListener("play", onPlay);
+    a.addEventListener("ended", onEnded);
+    a.addEventListener("error", onError);
+    return () => {
+      a.removeEventListener("play", onPlay);
+      a.removeEventListener("ended", onEnded);
+      a.removeEventListener("error", onError);
+    };
+  }, []);
+
+  // speak via OpenAI (fetch audio from our API and play)
+  async function speakWithOpenAI(rawText: string) {
+    const text = ritualize(rawText);
+    try {
+      const res = await fetch("/api/voice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text,
+          voice: openaiVoice, // e.g. "alloy"
+          format: "mp3",
+          stripEmojis: false, // already handled in ritualize
+        }),
+      });
+      if (!res.ok) {
+        console.error("voice api error", await res.text().catch(() => ""));
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+
+      const audio = audioRef.current || new Audio();
+      audioRef.current = audio;
+      audio.src = url;
+      audio.play().catch(() => {
+        // Autoplay might require interaction; the unlock button is visible until interacted
+      });
+    } catch (e) {
+      console.error("openai tts error", e);
+    }
+  }
+
+  // Auto-speak when new assistant text arrives (only after user interaction)
   useEffect(() => {
     if (!voicePrefs.enabled || !lastAssistant || !interacted) return;
-    if (typeof window === "undefined") return;
-
-    const synth = window.speechSynthesis;
-    if (!synth) return;
-
-    let cancelled = false;
-
-    (async () => {
-      // Wait briefly for high-quality voices to load (avoid robotic fallback)
-      let voices = synth.getVoices();
-      let tries = 0;
-      while (voices.length === 0 && tries < 10) {
-        await new Promise((r) => setTimeout(r, 150));
-        voices = synth.getVoices();
-        tries++;
-      }
-
-      if (cancelled) return;
-
-      try {
-        if (synth.speaking) synth.cancel();
-
-        const cleanText = stripEmojis(lastAssistant);
-        if (!cleanText.trim()) return;
-
-        const u = new SpeechSynthesisUtterance(cleanText);
-
-        // choose voice: user choice → best pick
-        let voiceToUse: SpeechSynthesisVoice | undefined;
-        if (voicePrefs.voiceName) {
-          voiceToUse = voices.find((vv) => vv.name === voicePrefs.voiceName);
-        }
-        if (!voiceToUse) {
-          const bestName = pickBestVoiceName(voices);
-          if (bestName) voiceToUse = voices.find((vv) => vv.name === bestName);
-        }
-        if (voiceToUse) u.voice = voiceToUse;
-
-        u.rate = Math.min(2, Math.max(0.5, voicePrefs.rate));
-        u.onstart = () => {
-          setSpeaking(true);
-          setMouthOpen(0.6);
-          bumpMouth();
-        };
-        u.onend = () => {
-          setSpeaking(false);
-          setMouthOpen(0);
-          if (decayTimer.current) {
-            window.clearInterval(decayTimer.current);
-            decayTimer.current = null;
-          }
-        };
-        u.onerror = () => {
-          setSpeaking(false);
-          setMouthOpen(0);
-          if (decayTimer.current) {
-            window.clearInterval(decayTimer.current);
-            decayTimer.current = null;
-          }
-        };
-        u.onboundary = () => bumpMouth();
-
-        synth.speak(u);
-      } catch {
-        /* ignore */
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [lastAssistant, voicePrefs, interacted]);
+    if (!lastAssistant.trim()) return;
+    speakWithOpenAI(lastAssistant);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastAssistant, voicePrefs.enabled, interacted, openaiVoice]);
 
   function setPrefs(p: Partial<VoicePrefs>) {
     const next = { ...voicePrefs, ...p };
@@ -523,8 +503,10 @@ export default function KnowRahWidget() {
     saveVoicePrefs(next);
 
     if (p.enabled === false && typeof window !== "undefined") {
-      const synth = window.speechSynthesis;
-      if (synth && synth.speaking) synth.cancel();
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
       setSpeaking(false);
       setMouthOpen(0);
       if (decayTimer.current) {
@@ -534,12 +516,14 @@ export default function KnowRahWidget() {
     }
   }
 
+  /* ------------------------------- UI ------------------------------------ */
+
   return (
     <div className="mx-auto w-full max-w-xl p-4 pt-[env(safe-area-inset-top)]">
       {/* header with avatar + priestess controls */}
       <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
-          {/* ★ Priestess avatar: hooded silhouette, emerald aura, incense smoke, etched glyphs */}
+          {/* ★ Priestess avatar */}
           <div
             className={[
               "relative w-16 h-16 rounded-full grid place-items-center overflow-hidden",
@@ -550,26 +534,20 @@ export default function KnowRahWidget() {
             ].join(" ")}
             title={speaking ? "Speaking" : "Listening"}
           >
-            {/* aura gradient behind */}
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_40%,rgba(16,185,129,0.35),transparent_60%)]" />
-            {/* incense smoke plumes */}
             <div className="absolute inset-0 pointer-events-none">
               <div className="kr-smoke kr-smoke-1" />
               <div className="kr-smoke kr-smoke-2" />
             </div>
-            {/* hooded silhouette */}
             <div className="relative z-[1]">
-              {/* simple hood/face using emoji as placeholder; we can swap to SVG later */}
               <span className="text-2xl select-none">🜂</span>
             </div>
-            {/* etched glyph ring on the rim */}
             <div className="pointer-events-none absolute inset-0 rounded-full kr-glyph-ring">
               <div className="absolute inset-[2px] rounded-full border border-emerald-500/15" />
               <div className="absolute inset-0 flex items-center justify-center text-[10px] text-emerald-300/50 tracking-[0.2em]">
                 <span className="kr-glyph-text">🌒 🜂 🧬 ∞ 🌒 🜂 🧬 ∞</span>
               </div>
             </div>
-
             {/* lip-sync mouth */}
             <div
               className="absolute left-1/2 bottom-2 -translate-x-1/2 origin-bottom w-8 h-2 rounded-full bg-emerald-200/25"
@@ -588,7 +566,7 @@ export default function KnowRahWidget() {
           </div>
         </div>
 
-        {/* Controls: wrap nicely on phones */}
+        {/* Controls: streamlined for OpenAI voice only */}
         <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-sm text-emerald-300/90 w-full sm:w-auto">
           <label className="flex items-center gap-1 select-none">
             <input
@@ -600,30 +578,14 @@ export default function KnowRahWidget() {
             Voice
           </label>
 
-          <select
-            className="bg-black/40 border border-emerald-800 rounded px-2 py-1 w-full sm:w-64 max-w-full"
-            value={voicePrefs.voiceName ?? ""}
-            onChange={(e) => setPrefs({ voiceName: e.target.value || null })}
-            title="Choose a system voice"
-          >
-            <option value="">System default</option>
-            {systemVoices.map((v) => (
-              <option key={v.name} value={v.name}>
-                {v.name} {v.lang ? `(${v.lang})` : ""}
-              </option>
-            ))}
-          </select>
-
-          <label className="flex items-center gap-2 w-full sm:w-auto">
-            Rate
+          <label className="flex items-center gap-2">
+            OpenAI Voice
             <input
-              type="range"
-              min={0.5}
-              max={2}
-              step={0.1}
-              value={voicePrefs.rate}
-              onChange={(e) => setPrefs({ rate: parseFloat(e.target.value) })}
-              className="w-full sm:w-40"
+              className="bg-black/40 border border-emerald-800 rounded px-2 py-1 w-36"
+              value={openaiVoice}
+              onChange={(e) => saveOpenAIVoice(e.target.value)}
+              title='Try voices like "alloy", "verse", "aria"'
+              placeholder="alloy"
             />
           </label>
 
@@ -652,7 +614,9 @@ export default function KnowRahWidget() {
               {m.role === "assistant" ? (
                 <div className="rounded-xl bg-emerald-900/30 p-2 whitespace-pre-wrap">{m.text}</div>
               ) : (
-                <div className="rounded-xl bg-neutral-800/50 p-2 text-right whitespace-pre-wrap">{m.text}</div>
+                <div className="rounded-xl bg-neutral-800/50 p-2 text-right whitespace-pre-wrap">
+                  {m.text}
+                </div>
               )}
             </div>
           ))}
@@ -692,6 +656,9 @@ export default function KnowRahWidget() {
       <div className="text-xs text-neutral-400 mt-2">
         Tip: Press Enter to send, Shift+Enter for newline.
       </div>
+
+      {/* Hidden audio for OpenAI playback */}
+      <audio ref={audioRef} hidden />
     </div>
   );
 }

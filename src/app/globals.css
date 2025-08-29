@@ -49,7 +49,7 @@ button, input, select, textarea {
   input, select, textarea, button { font-size: 16px; }
 }
 
-/* ---------- Your original avatar animations ---------- */
+/* ---------- Original animations ---------- */
 @keyframes kr-breathe {
   0%, 100% { transform: scale(1); filter: brightness(1); }
   50% { transform: scale(1.03); filter: brightness(1.08); }
@@ -62,7 +62,7 @@ button, input, select, textarea {
 .animate-kr-breathe { animation: kr-breathe 3.6s ease-in-out infinite; }
 .animate-kr-bloom   { animation: kr-bloom 1.2s ease-in-out infinite; }
 
-/* ---------- New: aura pulse (priestess) ---------- */
+/* ---------- New: aura pulse ---------- */
 @keyframes kr-aura {
   0%   { box-shadow: 0 0 50px 8px rgba(16,185,129,0.20); }
   50%  { box-shadow: 0 0 90px 14px rgba(16,185,129,0.38); }
@@ -92,13 +92,6 @@ button, input, select, textarea {
 .kr-smoke-2 { bottom: 2px; animation-delay: 1.2s; }
 
 /* ---------- New: etched glyph ring ---------- */
-.kr-glyph-ring {
-  display: inline-block;
-  border: 1px solid rgba(16, 185, 129, 0.25); /* emerald glow */
-  border-radius: 50%;
-  padding: 0.35rem;
-}
-
 .kr-glyph-text {
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial;
   text-shadow: 0 0 6px rgba(16,185,129,0.15);
@@ -111,13 +104,25 @@ button, input, select, textarea {
   to   { transform: rotate(360deg); }
 }
 
+/* ---------- New: eye blink ---------- */
+@keyframes kr-blink {
+  0%, 92%, 100% { transform: scaleY(1); }
+  94%, 96% { transform: scaleY(0.1); }
+  98% { transform: scaleY(1); }
+}
+.kr-eyes {
+  transform-origin: 26px 24.6px;
+  animation: kr-blink 5.8s ease-in-out infinite;
+}
+
 /* Respect reduced motion preferences */
 @media (prefers-reduced-motion: reduce) {
   .animate-kr-breathe,
   .animate-kr-bloom,
   .animate-kr-aura,
   .kr-smoke,
-  .kr-glyph-text {
+  .kr-glyph-text,
+  .kr-eyes {
     animation: none !important;
   }
 }
