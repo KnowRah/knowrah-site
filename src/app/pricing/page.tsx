@@ -1,15 +1,20 @@
 // src/app/pricing/page.tsx
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
+import { useState } from "react";
 
 type Plan = "personal" | "family" | "business";
 
+// Load client-only MetaMask component
+const MetaMaskPay = dynamic(() => import("@/components/MetaMaskPay"), { ssr: false });
+
 export default function PricingPage() {
   const [loading, setLoading] = useState<Plan | null>(null);
+  const enableCrypto = (process.env.NEXT_PUBLIC_ENABLE_CRYPTO_PAY || "1") === "1";
 
-  async function subscribe(plan: Plan) {
+  async function subscribeViaProvider(plan: Plan) {
     try {
       setLoading(plan);
       const res = await fetch("/api/billing/checkout", {
@@ -22,7 +27,7 @@ export default function PricingPage() {
       window.location.href = data.url as string;
     } catch (err) {
       console.error(err);
-      alert("Checkout not ready: verify env keys. See .env keys in the instructions.");
+      alert("Card checkout not ready here. Use the MetaMask button below, or check env.");
     } finally {
       setLoading(null);
     }
@@ -32,12 +37,14 @@ export default function PricingPage() {
     plan,
     title,
     price,
+    usd,
     features,
     highlight,
   }: {
     plan: Plan;
     title: string;
     price: string;
+    usd: number;
     features: string[];
     highlight?: boolean;
   }) => (
@@ -64,8 +71,10 @@ export default function PricingPage() {
           <li key={f}>• {f}</li>
         ))}
       </ul>
+
+      {/* Card/Hosted checkout (Paddle/Stripe) */}
       <button
-        onClick={() => subscribe(plan)}
+        onClick={() => subscribeViaProvider(plan)}
         disabled={loading !== null}
         className={[
           "mt-6 inline-flex w-full items-center justify-center rounded-xl px-4 py-2.5 text-sm font-medium",
@@ -77,6 +86,10 @@ export default function PricingPage() {
       >
         {loading === plan ? "Preparing checkout…" : "Subscribe"}
       </button>
+
+      {/* MetaMask fallback/primary */}
+      {enableCrypto && <MetaMaskPay plan={plan} usd={usd} />}
+
       {plan === "business" && (
         <p className="mt-3 text-xs text-zinc-500">
           Includes 300 minutes; overage metered. Clear disclosures on calls.
@@ -92,7 +105,7 @@ export default function PricingPage() {
           Pricing
         </h1>
         <p className="mt-3 max-w-2xl text-zinc-400">
-          Simple tiers. Upgrade anytime. Telephony lives on Business.
+          Pay by card (hosted checkout) or crypto via MetaMask (USDC).
         </p>
 
         <div className="mt-8 grid gap-6 md:grid-cols-3">
@@ -100,6 +113,7 @@ export default function PricingPage() {
             plan="personal"
             title="Personal"
             price="$20"
+            usd={20}
             features={[
               "Daily voice companion",
               "Memory & identity",
@@ -110,6 +124,7 @@ export default function PricingPage() {
             plan="family"
             title="Family"
             price="$50"
+            usd={50}
             features={[
               "Tutor Mode + whiteboard",
               "4 shared profiles",
@@ -120,6 +135,7 @@ export default function PricingPage() {
             plan="business"
             title="Business"
             price="$500"
+            usd={500}
             features={[
               "1 number, 300 included minutes",
               "RAG knowledge base (cited)",
