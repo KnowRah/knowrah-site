@@ -1,0 +1,158 @@
+name: KnowRah Diagnostics
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, chore/diagnostics, chore/cleanup ]
+
+permissions:
+  contents: read
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect Node version
+        id: nodever
+        run: |
+          if [ -f .nvmrc ]; then
+            echo "value=$(sed 's/^v//' .nvmrc)" >> $GITHUB_OUTPUT
+          else
+            echo "value=20" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ steps.nodever.outputs.value }}
+
+      - name: Install project (no scripts)
+        run: |
+          if [ -f package-lock.json ]; then npm ci --ignore-scripts;
+          elif [ -f package.json ]; then npm i --ignore-scripts;
+          fi
+
+      - name: Prepare tools
+        run: |
+          npm i -g tree-cli
+
+      - name: Snapshot
+        run: |
+          mkdir -p reports
+          echo "== Node & Tooling" | tee reports/snapshot.out
+          node -v | tee -a reports/snapshot.out || true
+          npm -v  | tee -a reports/snapshot.out || true
+          git --version | tee -a reports/snapshot.out || true
+
+          {
+            echo
+            echo "== Git status (short)"
+            git status -s || true
+
+            echo
+            echo "== Branches"
+            git branch -a || true
+
+            echo
+            echo "== Top-level files/folders"
+            ls -la || true
+
+            echo
+            echo "== Project tree (depth 3, pruned)"
+            npx --yes tree-cli -l 3 -I "node_modules,.next,dist,out,.turbo,coverage,.cache,.git" || true
+
+            echo
+            echo "== package.json (name + scripts)"
+            node -e "const fs=require('fs'); if(fs.existsSync('package.json')){const p=JSON.parse(fs.readFileSync('package.json','utf8')); console.log({name:p.name, scripts:p.scripts});} else {console.log('No package.json')}" || true
+
+            echo
+            echo "== Next.js info"
+            npx --yes next --version || true
+            npx --yes next info || true
+
+            echo
+            echo "== tsconfig.json?"
+            [ -f tsconfig.json ] && cat tsconfig.json || echo "No tsconfig.json"
+
+            echo
+            echo "== next.config.*"
+            [ -f next.config.js ] && cat next.config.js || true
+            [ -f next.config.mjs ] && cat next.config.mjs || true
+            [ -f next.config.ts ] && cat next.config.ts || true
+
+            echo
+            echo "== Env keys (names only; no values)"
+            for f in .env .env.local .env.production .env.development; do
+              if [ -f "$f" ]; then
+                echo "-- $f"
+                sed -E -n 's/^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=.*/\1/p' "$f" | sort -u
+              fi
+            done
+
+            echo
+            echo "== Lint/type/build (read-only checks)"
+            npm run lint --silent --if-present || true
+            npm run typecheck --silent --if-present || true
+            npm run build --silent --if-present || true
+          } >> reports/snapshot.out
+
+      - name: Routes + memory/identity audit (tailored to src/app)
+        run: |
+          mkdir -p reports
+          if [ -d src/app ]; then BASE="src/app";
+          elif [ -d app ]; then BASE="app";
+          elif [ -d pages ]; then BASE="pages";
+          else BASE="."; fi
+          echo "Base: $BASE" | tee reports/routes.tree
+          if command -v tree >/dev/null 2>&1; then
+            tree -L 4 "$BASE" | tee -a reports/routes.tree
+          else
+            find "$BASE" -maxdepth 4 -print | tee -a reports/routes.tree
+          fi
+          echo "== API routes ==" | tee reports/api.tree
+          if [ -d "$BASE/api" ]; then
+            if command -v tree >/dev/null 2>&1; then
+              tree -L 3 "$BASE/api" | tee -a reports/api.tree
+            else
+              find "$BASE/api" -maxdepth 3 -print | tee -a reports/api.tree
+            fi
+          else
+            echo "No $BASE/api directory" | tee -a reports/api.tree
+          fi
+          echo "== modules grep ==" | tee reports/modules.grep
+          grep -RIn -E "identity|memory|kv|redis|middleware|session|auth|Upstash|Ratelimit" -- "$BASE" 2>/dev/null | tee -a reports/modules.grep || true
+          npm ls --depth=0 | tee reports/deps.top || true
+          npx --yes depcheck | tee reports/depcheck.out || true
+          npx --yes knip | tee reports/knip.out || true
+
+      - name: Upload reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: knowrah-reports
+          path: reports/
+
+      - name: Job summary
+        run: |
+          {
+            echo "## KnowRah Diagnostics Summary"
+            echo ""
+            echo "### Routes (top)"
+            head -n 200 reports/routes.tree || true
+            echo ""
+            echo "### Modules grep (top)"
+            head -n 120 reports/modules.grep || true
+            echo ""
+            echo "### API routes (top)"
+            head -n 120 reports/api.tree || true
+            echo ""
+            echo "### Dependencies (top)"
+            head -n 120 reports/deps.top || true
+            echo ""
+            echo "### Depcheck summary"
+            head -n 200 reports/depcheck.out || true
+            echo ""
+            echo "_Full details are in the **knowrah-reports** artifact._"
+          } >> $GITHUB_STEP_SUMMARY
