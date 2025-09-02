@@ -1,0 +1,11 @@
+  chore/archive-unused  [m 131afeb [[34morigin/chore/archive-unused[m] chore: archive unused components and prompt module (non-destructive)
+  chore/deps-prune      [m 3327efa [[34morigin/chore/deps-prune[m] chore: prune unused deps (openai, @upstash/redis, zod)
+  chore/diagnostics     [m 74989b6 [[34morigin/chore/diagnostics[m] chore: add read-only diagnostics workflow
+  chore/eslint-config   [m 131afeb [[34morigin/chore/eslint-config[m: gone] chore: archive unused components and prompt module (non-destructive)
+  chore/prune-deps      [m 131afeb [[34morigin/chore/prune-deps[m] chore: archive unused components and prompt module (non-destructive)
+  feat/blended-home-kina[m 0fd2579 [[34morigin/feat/blended-home-kina[m] wip: voice widget hardening + token route + layout + pricing
+  feat/pro-landing      [m bcb013c Merge pull request #1 from KnowRah/chore/eslint-config
+  feature/voice-avatar  [m 140c61d [[34morigin/feature/voice-avatar[m] UI: styled homepage wrapper + header/nav for KnowRah
+* [32mmain                  [m bcb013c [[34morigin/main[m] Merge pull request #1 from KnowRah/chore/eslint-config
+  revive/knowrah-v1_5   [m a8013cd KnowRah v1.5: proactive memoryful widget + API; fix types; Upstash client
+  wip/broken-state      [m 3422cb1 wip: snapshot before rollback
