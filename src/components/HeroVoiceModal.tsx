@@ -16,13 +16,32 @@ export default function HeroVoiceModal({ open, onClose }: Props) {
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
 
-  const model =
+  const defaultModel =
     process.env.NEXT_PUBLIC_REALTIME_MODEL || "gpt-4o-realtime-preview-2024-12-17";
 
+  // Codespaces block (kept for clarity)
   const blockedByHost = useMemo(() => {
     if (typeof window === "undefined") return false;
     return window.location.hostname.endsWith(".app.github.dev");
   }, []);
+
+  function waitForIceGatheringComplete(pc: RTCPeerConnection) {
+    if (pc.iceGatheringState === "complete") return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      function check() {
+        if (pc.iceGatheringState === "complete") {
+          pc.removeEventListener("icegatheringstatechange", check);
+          resolve();
+        }
+      }
+      pc.addEventListener("icegatheringstatechange", check);
+      // safety timeout in case some browsers never fire; send what we have
+      setTimeout(() => {
+        pc.removeEventListener("icegatheringstatechange", check);
+        resolve();
+      }, 1500);
+    });
+  }
 
   async function startSession() {
     try {
@@ -34,6 +53,7 @@ export default function HeroVoiceModal({ open, onClose }: Props) {
       }
       setStatus("connecting");
 
+      // 1) Mic + local monitor
       const local = await navigator.mediaDevices.getUserMedia({ audio: true });
       localStreamRef.current = local;
       if (localRef.current) {
@@ -42,6 +62,7 @@ export default function HeroVoiceModal({ open, onClose }: Props) {
         await localRef.current.play().catch(() => {});
       }
 
+      // 2) Peer connection
       const pc = new RTCPeerConnection();
       pcRef.current = pc;
 
@@ -56,22 +77,28 @@ export default function HeroVoiceModal({ open, onClose }: Props) {
         }
       };
 
+      // 3) Offer + WAIT for ICE candidates
       const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: false });
       await pc.setLocalDescription(offer);
+      await waitForIceGatheringComplete(pc);
+      const localSdp = pc.localDescription?.sdp || offer.sdp || "";
 
-      // Get ephemeral client token from our server
+      // 4) Ephemeral token from our server
       const tokenRes = await fetch("/api/realtime/session", { method: "POST" });
       const tokenJson = await tokenRes.json();
       if (!tokenRes.ok) {
-        throw new Error(`Token error ${tokenRes.status}: ${tokenJson?.error || JSON.stringify(tokenJson)}`);
+        throw new Error(`Token ${tokenRes.status}: ${tokenJson?.error || JSON.stringify(tokenJson)}`);
       }
       const EPHEMERAL: string | undefined =
         tokenJson?.client_secret?.value || tokenJson?.client_secret || tokenJson?.value;
       if (!EPHEMERAL) throw new Error("Missing ephemeral client token");
 
-      // --- Realtime SDP negotiation (add required headers) ---
+      // Prefer the model returned by the session; fall back to default
+      const negotiatedModel: string = tokenJson?.model || defaultModel;
+
+      // 5) Realtime negotiation (send full SDP w/ ICE candidates)
       const sdpRes = await fetch(
-        `https://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`,
+        `https://api.openai.com/v1/realtime?model=${encodeURIComponent(negotiatedModel)}`,
         {
           method: "POST",
           headers: {
@@ -80,30 +107,31 @@ export default function HeroVoiceModal({ open, onClose }: Props) {
             Accept: "application/sdp",
             "OpenAI-Beta": "realtime=v1",
           },
-          body: offer.sdp || "",
+          body: localSdp,
         }
       );
 
       const sdpText = await sdpRes.text();
       if (!sdpRes.ok) {
-        throw new Error(`Negotiation ${sdpRes.status}: ${sdpText}`);
+        // If the API returns JSON, surface it; otherwise show raw text
+        try {
+          const j = JSON.parse(sdpText);
+          throw new Error(`Negotiation ${sdpRes.status}: ${JSON.stringify(j.error || j)}`);
+        } catch {
+          throw new Error(`Negotiation ${sdpRes.status}: ${sdpText || "Bad Request"}`);
+        }
       }
-      const answer: RTCSessionDescriptionInit = { type: "answer", sdp: sdpText };
-      await pc.setRemoteDescription(answer);
 
+      await pc.setRemoteDescription({ type: "answer", sdp: sdpText });
       setStatus("connected");
     } catch (err: any) {
       setStatus("error");
       const msg = String(err?.message || err || "");
       const isDenied =
         err?.name === "NotAllowedError" || msg.toLowerCase().includes("permission denied");
-      if (blockedByHost) {
-        setErrMsg("Microphone is blocked by this host. Use Vercel preview or localhost.");
-      } else if (isDenied) {
-        setErrMsg("Microphone access was denied. Check site permissions and retry.");
-      } else {
-        setErrMsg(msg || "Realtime negotiation failed");
-      }
+      if (blockedByHost) setErrMsg("Microphone is blocked by this host. Use Vercel preview or localhost.");
+      else if (isDenied) setErrMsg("Microphone access was denied. Check site permissions and retry.");
+      else setErrMsg(msg || "Realtime negotiation failed");
       console.error(err);
     }
   }
