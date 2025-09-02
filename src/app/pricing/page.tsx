@@ -8,11 +8,10 @@ import { useState } from "react";
 type Plan = "personal" | "family" | "business";
 
 // Load client-only MetaMask component
-const MetaMaskPay = dynamic(() => import("@/components/MetaMaskPay"), { ssr: false });
 
 export default function PricingPage() {
   const [loading, setLoading] = useState<Plan | null>(null);
-  const enableCrypto = (process.env.NEXT_PUBLIC_ENABLE_CRYPTO_PAY || "1") === "1";
+const enableCrypto = false;
 
   async function subscribeViaProvider(plan: Plan) {
     try {
@@ -88,7 +87,7 @@ export default function PricingPage() {
       </button>
 
       {/* MetaMask fallback/primary */}
-      {enableCrypto && <MetaMaskPay plan={plan} usd={usd} />}
+
 
       {plan === "business" && (
         <p className="mt-3 text-xs text-zinc-500">

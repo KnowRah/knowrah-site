@@ -153,7 +153,7 @@ export default function KnowRahWidget() {
       if (idleFor >= idleDelayMs.current && !typing) {
         try {
           const styleHints = pickStyleHints();
-          const r = await fetch("/api/knowrah", {
+          const r = await fetch("/api/chat", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -190,7 +190,7 @@ export default function KnowRahWidget() {
     (async () => {
       try {
         const styleHints = pickStyleHints();
-        const r = await fetch("/api/knowrah", {
+        const r = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -228,7 +228,7 @@ export default function KnowRahWidget() {
     setSending(true);
     try {
       const styleHints = pickStyleHints();
-      const r = await fetch("/api/knowrah", {
+      const r = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -295,7 +295,7 @@ export default function KnowRahWidget() {
     try {
       startFallback();
       const styleHints = pickStyleHints();
-      const res = await fetch("/api/knowrah/stream", {
+      const res = await fetch("/api/chat/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" },
         body: JSON.stringify({
