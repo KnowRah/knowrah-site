@@ -14,12 +14,12 @@ export default function HeroVoiceModal({ open, onClose }: Props) {
   const remoteRef = useRef<HTMLAudioElement>(null);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
+  const dcRef = useRef<RTCDataChannel | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
 
   const defaultModel =
     process.env.NEXT_PUBLIC_REALTIME_MODEL || "gpt-4o-realtime-preview-2024-12-17";
 
-  // Codespaces block (kept for clarity)
   const blockedByHost = useMemo(() => {
     if (typeof window === "undefined") return false;
     return window.location.hostname.endsWith(".app.github.dev");
@@ -28,16 +28,15 @@ export default function HeroVoiceModal({ open, onClose }: Props) {
   function waitForIceGatheringComplete(pc: RTCPeerConnection) {
     if (pc.iceGatheringState === "complete") return Promise.resolve();
     return new Promise<void>((resolve) => {
-      function check() {
+      const done = () => {
         if (pc.iceGatheringState === "complete") {
-          pc.removeEventListener("icegatheringstatechange", check);
+          pc.removeEventListener("icegatheringstatechange", done);
           resolve();
         }
-      }
-      pc.addEventListener("icegatheringstatechange", check);
-      // safety timeout in case some browsers never fire; send what we have
+      };
+      pc.addEventListener("icegatheringstatechange", done);
       setTimeout(() => {
-        pc.removeEventListener("icegatheringstatechange", check);
+        pc.removeEventListener("icegatheringstatechange", done);
         resolve();
       }, 1500);
     });
@@ -62,9 +61,16 @@ export default function HeroVoiceModal({ open, onClose }: Props) {
         await localRef.current.play().catch(() => {});
       }
 
-      // 2) Peer connection
+      // 2) Peer connection + create the events data channel BEFORE createOffer
       const pc = new RTCPeerConnection();
       pcRef.current = pc;
+
+      const dc = pc.createDataChannel("oai-events");
+      dcRef.current = dc;
+      dc.onmessage = (e) => {
+        // Useful for debugging transcripts/events
+        // console.log("oai:", e.data);
+      };
 
       local.getTracks().forEach((t) => pc.addTrack(t, local));
 
@@ -77,13 +83,13 @@ export default function HeroVoiceModal({ open, onClose }: Props) {
         }
       };
 
-      // 3) Offer + WAIT for ICE candidates
+      // 3) Offer + wait for ICE
       const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: false });
       await pc.setLocalDescription(offer);
       await waitForIceGatheringComplete(pc);
       const localSdp = pc.localDescription?.sdp || offer.sdp || "";
 
-      // 4) Ephemeral token from our server
+      // 4) Ephemeral session
       const tokenRes = await fetch("/api/realtime/session", { method: "POST" });
       const tokenJson = await tokenRes.json();
       if (!tokenRes.ok) {
@@ -92,13 +98,11 @@ export default function HeroVoiceModal({ open, onClose }: Props) {
       const EPHEMERAL: string | undefined =
         tokenJson?.client_secret?.value || tokenJson?.client_secret || tokenJson?.value;
       if (!EPHEMERAL) throw new Error("Missing ephemeral client token");
+      const model: string = tokenJson?.model || defaultModel;
 
-      // Prefer the model returned by the session; fall back to default
-      const negotiatedModel: string = tokenJson?.model || defaultModel;
-
-      // 5) Realtime negotiation (send full SDP w/ ICE candidates)
+      // 5) SDP negotiation
       const sdpRes = await fetch(
-        `https://api.openai.com/v1/realtime?model=${encodeURIComponent(negotiatedModel)}`,
+        `https://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`,
         {
           method: "POST",
           headers: {
@@ -113,7 +117,6 @@ export default function HeroVoiceModal({ open, onClose }: Props) {
 
       const sdpText = await sdpRes.text();
       if (!sdpRes.ok) {
-        // If the API returns JSON, surface it; otherwise show raw text
         try {
           const j = JSON.parse(sdpText);
           throw new Error(`Negotiation ${sdpRes.status}: ${JSON.stringify(j.error || j)}`);
@@ -121,8 +124,23 @@ export default function HeroVoiceModal({ open, onClose }: Props) {
           throw new Error(`Negotiation ${sdpRes.status}: ${sdpText || "Bad Request"}`);
         }
       }
-
       await pc.setRemoteDescription({ type: "answer", sdp: sdpText });
+
+      // 6) When the data channel opens, ask the model to greet the user.
+      dc.onopen = () => {
+        dc.send(
+          JSON.stringify({
+            type: "response.create",
+            response: {
+              modalities: ["audio"],
+              conversation: "default",
+              instructions:
+                "Give a short, friendly greeting as KnowRah and invite the user to ask something.",
+            },
+          })
+        );
+      };
+
       setStatus("connected");
     } catch (err: any) {
       setStatus("error");
@@ -138,6 +156,8 @@ export default function HeroVoiceModal({ open, onClose }: Props) {
 
   function stopSession() {
     try {
+      dcRef.current?.close();
+      dcRef.current = null;
       pcRef.current?.getSenders().forEach((s) => s.track?.stop());
       pcRef.current?.close();
       pcRef.current = null;
